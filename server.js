@@ -173,6 +173,56 @@ const deleteRol = (idrol, callback) => {
     db.query(query, [idrol], callback);
 };
 
+// funciones de modelo de permisos
+
+const createPermiso = async (nompermiso, clave, callback) => {
+    try {
+        const query = 'INSERT INTO permiso (nompermiso , clave) VALUES (?,?)';
+        db.query(query, [nompermiso, clave], callback);
+    } catch (err) {
+        callback(err, null);
+    }
+};
+const updatePermiso = async (idpermiso, nompermiso, clave, callback) => {
+    try {
+        const query = 'UPDATE permiso SET nompermiso = ?, clave = ? WHERE idpermiso = ?';
+        db.query(query, [ nompermiso, clave, idpermiso], callback);
+    } catch (err) {
+        callback(err, null);
+    }
+};
+
+
+const deletePermiso = (idrol, callback) => {
+    const query = 'DELETE FROM permiso WHERE idrol = ?';
+    db.query(query, [idpermiso], callback);
+};
+
+
+const createRolxPermiso = (idrol, idpermiso, callback) => {
+    try {
+        const query = 'INSERT INTO rolxpermiso (idrol, idpermiso) VALUES (?, ?)';
+        db.query(query, [idrol, idpermiso], callback);
+    } catch (err) {
+        callback(err, null);
+    }
+};
+
+const updateRolxPermiso = (idrol, idpermiso, newIdrol, newIdpermiso, callback) => {
+    try {
+        const query = 'UPDATE rolxpermiso SET idrol = ?, idpermiso = ? WHERE idrol = ? AND idpermiso = ?';
+        db.query(query, [newIdrol, newIdpermiso, idrol, idpermiso], callback);
+    } catch (err) {
+        callback(err, null);
+    }
+};
+
+const deleteRolxPermiso = (idrol, idpermiso, callback) => {
+    const query = 'DELETE FROM rolxpermiso WHERE idrol = ? AND idpermiso = ?';
+    db.query(query, [idrol, idpermiso], callback);
+};
+
+
 // Endpoint GET para obtener todos los usuarios
 app.get('/usuarios', (req, res) => {
     const query = 'SELECT * FROM users';
@@ -312,7 +362,7 @@ app.get('/buscar-producto', (req, res) => {
         }
         res.status(200).json(results);
     });
-});
+}); 
 
 // Endpoint PUT para actualizar un producto
 app.put('/actualizar-producto/:idproducto', async (req, res) => {
@@ -453,6 +503,18 @@ app.delete('/eliminar-compra/:idcompra', (req, res) => {
     });
 });
 
+// Endpoint GET para obtener todos los roles
+app.get('/roles', (req, res) => {
+    const query = 'SELECT * FROM rol';
+    db.query(query, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
 // Endpoint POST para registrar un rol
 app.post('/nuevo-rol', async (req, res) => {
     const { nomrol } = req.body;
@@ -497,15 +559,150 @@ app.delete('/eliminar-rol/:idrol', (req, res) => {
     });
 });
 
-// Endpoint GET para obtener todos los roles
-app.get('/roles', (req, res) => {
-    const query = 'SELECT * FROM rol';
+
+
+// Endpoint GET para obtener todas las relaciones rol-permiso
+app.get('/permisos', (req, res) => {
+    const query = 'SELECT * FROM permiso';
     db.query(query, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
         }
         res.status(200).json(results);
+    });
+});
+
+// Endpoint POST para registrar un permiso
+app.post('/nuevo-permiso', async (req, res) => {
+    const { nompermiso, clave } = req.body;
+    createPermiso(nompermiso, clave, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(201).json({ message: 'Permiso registrado exitosamente' });
+    });
+});
+
+// Endpoint PUT para actualizar un permiso
+app.put('/actualizar-permiso/:idpermiso', async (req, res) => {
+    const { idpermiso } = req.params;
+    const { nompermiso, clave } = req.body;
+    updatePermiso(idpermiso, nompermiso, clave, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Permiso no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Permiso actualizado exitosamente' });
+    });
+});
+
+// Endpoint DELETE para eliminar un permiso
+app.delete('/eliminar-permiso/:idpermiso', (req, res) => {
+    const { idpermiso } = req.params;
+    deletePermiso(idpermiso, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Permiso no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Permiso eliminado exitosamente' });
+    });
+});
+
+// Endpoint GET para obtener todas las relaciones rol-permiso
+app.get('/rolxpermiso', (req, res) => {
+    const query = 'SELECT * FROM rolxpermiso';
+    db.query(query, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
+//endpoint post para agregar un rolxpermiso
+
+app.post('/agregar-rolxpermiso', async (req, res) => {
+    const { idrol, idpermiso } = req.body;
+
+    // Verificar que el rol exista
+    const roleQuery = 'SELECT * FROM rol WHERE idrol = ?';
+    db.query(roleQuery, [idrol], (roleErr, roleResults) => {
+        if (roleErr) {
+            res.status(500).send(roleErr);
+            return;
+        }
+        if (roleResults.length === 0) {
+            res.status(404).json({ message: 'Rol no encontrado' });
+            return;
+        }
+
+        // Verificar que el permiso exista
+        const permisoQuery = 'SELECT * FROM permiso WHERE idpermiso = ?';
+        db.query(permisoQuery, [idpermiso], (permisoErr, permisoResults) => {
+            if (permisoErr) {
+                res.status(500).send(permisoErr);
+                return;
+            }
+            if (permisoResults.length === 0) {
+                res.status(404).json({ message: 'Permiso no encontrado' });
+                return;
+            }
+
+            // Crear la relación rol-permiso
+            createRolxPermiso(idrol, idpermiso, (createErr, createResults) => {
+                if (createErr) {
+                    res.status(500).send(createErr);
+                    return;
+                }
+                res.status(201).json({ message: 'Relación rol-permiso agregada exitosamente' });
+            });
+        });
+    });
+});
+
+//endpoint PUT para actualizar el rolxpemiso
+app.put('/actualizar-rolxpermiso', async (req, res) => {
+    const { idrol, idpermiso, newIdrol, newIdpermiso } = req.body;
+
+    updateRolxPermiso(idrol, idpermiso, newIdrol, newIdpermiso, (updateErr, updateResults) => {
+        if (updateErr) {
+            res.status(500).send(updateErr);
+            return;
+        }
+        if (updateResults.affectedRows === 0) {
+            res.status(404).json({ message: 'Relación rol-permiso no encontrada' });
+            return;
+        }
+        res.status(200).json({ message: 'Relación rol-permiso actualizada exitosamente' });
+    });
+});
+
+//endpoint Delete para eliminar una relacion rolxpermimso
+
+app.delete('/eliminar-rolxpermiso', async (req, res) => {
+    const { idrol, idpermiso } = req.body;
+
+    deleteRolxPermiso(idrol, idpermiso, (deleteErr, deleteResults) => {
+        if (deleteErr) {
+            res.status(500).send(deleteErr);
+            return;
+        }
+        if (deleteResults.affectedRows === 0) {
+            res.status(404).json({ message: 'Relación rol-permiso no encontrada' });
+            return;
+        }
+        res.status(200).json({ message: 'Relación rol-permiso eliminada exitosamente' });
     });
 });
 
