@@ -111,35 +111,41 @@ const searchProducto = (nombre, callback) => {
     db.query(query, [`%${nombre}%`], callback);
 };
 
-// Función del modelo de compra
-const createCompra = (total, fecha, iduser, idproducto, callback) => {
-    const query = 'INSERT INTO compra (total, fecha, iduser, idproducto) VALUES (?, ?, ?, ?)';
-    db.query(query, [total, fecha, iduser, idproducto], callback);
+
+//modelo de compra
+const createCompra = (fecha, iduser, idproducto, callback) => {
+    // Obtener el precio del producto
+    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
+        if (productErr) {
+            return callback(productErr, null);
+        }
+        if (productResults.length === 0) {
+            return callback(new Error('Producto no encontrado'), null);
+        }
+
+        const total = productResults[0].p_producto;
+
+        const query = 'INSERT INTO compra (total, fecha, iduser, idproducto) VALUES (?, ?, ?, ?)';
+        db.query(query, [total, fecha, iduser, idproducto], callback);
+    });
 };
 
-const updateCompra = async (idcompra, total, fecha, iduser, idproducto, callback) => {
-    const checkUserQuery = 'SELECT * FROM users WHERE iduser = ?';
-    const checkProductQuery = 'SELECT * FROM producto WHERE idproducto = ?';
-    
-    db.query(checkUserQuery, [iduser], (err, userResults) => {
-        if (err) {
-            return callback(err, null);
+const updateCompra = (idcompra, fecha, iduser, idproducto, callback) => {
+    // Obtener el precio del producto
+    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
+        if (productErr) {
+            return callback(productErr, null);
         }
-        if (userResults.length === 0) {
-            return callback(new Error('Usuario no encontrado'), null);
+        if (productResults.length === 0) {
+            return callback(new Error('Producto no encontrado'), null);
         }
 
-        db.query(checkProductQuery, [idproducto], (err, productResults) => {
-            if (err) {
-                return callback(err, null);
-            }
-            if (productResults.length === 0) {
-                return callback(new Error('Producto no encontrado'), null);
-            }
+        const total = productResults[0].p_producto;
 
-            const query = 'UPDATE compra SET total = ?, fecha = ?, iduser = ?, idproducto = ? WHERE idcompra = ?';
-            db.query(query, [total, fecha, iduser, idproducto, idcompra], callback);
-        });
+        const query = 'UPDATE compra SET total = ?, fecha = ?, iduser = ?, idproducto = ? WHERE idcompra = ?';
+        db.query(query, [total, fecha, iduser, idproducto, idcompra], callback);
     });
 };
 
@@ -147,7 +153,6 @@ const deleteCompra = (idcompra, callback) => {
     const query = 'DELETE FROM compra WHERE idcompra = ?';
     db.query(query, [idcompra], callback);
 };
-
 
 // funciones de modelo de roles
 
@@ -221,6 +226,67 @@ const deleteRolxPermiso = (idrol, idpermiso, callback) => {
     const query = 'DELETE FROM rolxpermiso WHERE idrol = ? AND idpermiso = ?';
     db.query(query, [idrol, idpermiso], callback);
 };
+
+//moodelo carrito de compras
+
+const addToCart = (iduser, idproducto, cantidad, callback) => {
+    // Obtener el precio del producto
+    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
+        if (productErr) {
+            return callback(productErr, null);
+        }
+        if (productResults.length === 0) {
+            return callback(new Error('Producto no encontrado'), null);
+        }
+        
+        const precio = productResults[0].p_producto;
+        const total = precio * cantidad;
+
+        const query = 'INSERT INTO carrito (iduser, idproducto, cantidad, total) VALUES (?, ?, ?, ?)';
+        db.query(query, [iduser, idproducto, cantidad, total], callback);
+    });
+};
+
+const updateCartItem = (iduser, idproducto, cantidad, callback) => {
+    // Obtener el precio del producto
+    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
+        if (productErr) {
+            return callback(productErr, null);
+        }
+        if (productResults.length === 0) {
+            return callback(new Error('Producto no encontrado'), null);
+        }
+        
+        const precio = productResults[0].p_producto;
+        const total = precio * cantidad;
+
+        const query = 'UPDATE carrito SET cantidad = ?, total = ? WHERE iduser = ? AND idproducto = ?';
+        db.query(query, [cantidad, total, iduser, idproducto], callback);
+    });
+};
+
+const deleteCartItem = (iduser, idproducto, callback) => {
+    const query = 'DELETE FROM carrito WHERE iduser = ? AND idproducto = ?';
+    db.query(query, [iduser, idproducto], callback);
+};
+
+const getCartItems = (iduser, callback) => {
+    const query = `
+        SELECT 
+            carrito.iduser, 
+            carrito.idproducto, 
+            carrito.cantidad, 
+            carrito.total, 
+            producto.nomprod, 
+            producto.p_producto 
+        FROM carrito 
+        JOIN producto ON carrito.idproducto = producto.idproducto 
+        WHERE carrito.iduser = ?`;
+    db.query(query, [iduser], callback);
+};
+
 
 
 // Endpoint GET para obtener todos los usuarios
@@ -397,7 +463,7 @@ app.delete('/eliminar-producto/:idproducto', (req, res) => {
     });
 });
 
-//Endopoint GET para obtener todas las compras
+// Endpoint GET para obtener todas las compras
 app.get('/compras', (req, res) => {
     const query = `
         SELECT 
@@ -421,8 +487,8 @@ app.get('/compras', (req, res) => {
 });
 
 // Endpoint POST para agregar una compra
-app.post('/nueva-compra', async (req, res) => {
-    const { total, fecha, iduser, idproducto } = req.body;
+app.post('/nueva-compra', (req, res) => {
+    const { fecha, iduser, idproducto } = req.body;
 
     // Verificar que el usuario exista
     const userQuery = 'SELECT * FROM users WHERE iduser = ?';
@@ -449,7 +515,7 @@ app.post('/nueva-compra', async (req, res) => {
             }
 
             // Crear la compra
-            createCompra(total, fecha, iduser, idproducto, (compraErr, compraResults) => {
+            createCompra(fecha, iduser, idproducto, (compraErr, compraResults) => {
                 if (compraErr) {
                     res.status(500).send(compraErr);
                     return;
@@ -460,12 +526,12 @@ app.post('/nueva-compra', async (req, res) => {
     });
 });
 
-// Endpoint PUT para agregar una compra
+// Endpoint PUT para actualizar una compra
 app.put('/actualizar-compra/:idcompra', (req, res) => {
     const { idcompra } = req.params;
-    const { total, fecha, iduser, idproducto } = req.body;
-    
-    updateCompra(idcompra, total, fecha, iduser, idproducto, (err, results) => {
+    const { fecha, iduser, idproducto } = req.body;
+
+    updateCompra(idcompra, fecha, iduser, idproducto, (err, results) => {
         if (err) {
             if (err.message === 'Usuario no encontrado') {
                 res.status(404).json({ message: 'Usuario no encontrado' });
@@ -484,12 +550,10 @@ app.put('/actualizar-compra/:idcompra', (req, res) => {
     });
 });
 
-
-// Endpoint DELETE para agregar una compra
-
+// Endpoint DELETE para eliminar una compra
 app.delete('/eliminar-compra/:idcompra', (req, res) => {
     const { idcompra } = req.params;
-    
+
     deleteCompra(idcompra, (err, results) => {
         if (err) {
             res.status(500).send(err);
@@ -705,6 +769,95 @@ app.delete('/eliminar-rolxpermiso', async (req, res) => {
         res.status(200).json({ message: 'Relación rol-permiso eliminada exitosamente' });
     });
 });
+
+// Endpoint POST para agregar un producto al carrito
+app.post('/agregar-al-carrito', async (req, res) => {
+    const { iduser, idproducto, cantidad } = req.body;
+
+    // Verificar que el usuario exista
+    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(userQuery, [iduser], (userErr, userResults) => {
+        if (userErr) {
+            res.status(500).send(userErr);
+            return;
+        }
+        if (userResults.length === 0) {
+            res.status(404).json({ message: 'Usuario no encontrado' });
+            return;
+        }
+
+        // Verificar que el producto exista
+        const productQuery = 'SELECT * FROM producto WHERE idproducto = ?';
+        db.query(productQuery, [idproducto], (productErr, productResults) => {
+            if (productErr) {
+                res.status(500).send(productErr);
+                return;
+            }
+            if (productResults.length === 0) {
+                res.status(404).json({ message: 'Producto no encontrado' });
+                return;
+            }
+
+            // Agregar el producto al carrito
+            addToCart(iduser, idproducto, cantidad, (cartErr, cartResults) => {
+                if (cartErr) {
+                    res.status(500).send(cartErr);
+                    return;
+                }
+                res.status(201).json({ message: 'Producto agregado al carrito exitosamente' });
+            });
+        });
+    });
+});
+
+// Endpoint PUT para actualizar la cantidad de un producto en el carrito
+app.put('/actualizar-carrito', async (req, res) => {
+    const { iduser, idproducto, cantidad } = req.body;
+
+    updateCartItem(iduser, idproducto, cantidad, (updateErr, updateResults) => {
+        if (updateErr) {
+            res.status(500).send(updateErr);
+            return;
+        }
+        if (updateResults.affectedRows === 0) {
+            res.status(404).json({ message: 'Elemento del carrito no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Carrito actualizado exitosamente' });
+    });
+});
+
+// Endpoint DELETE para eliminar un producto del carrito
+app.delete('/eliminar-del-carrito', (req, res) => {
+    const { iduser, idproducto } = req.body;
+
+    deleteCartItem(iduser, idproducto, (deleteErr, deleteResults) => {
+        if (deleteErr) {
+            res.status(500).send(deleteErr);
+            return;
+        }
+        if (deleteResults.affectedRows === 0) {
+            res.status(404).json({ message: 'Elemento del carrito no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Producto eliminado del carrito exitosamente' });
+    });
+});
+
+// Endpoint GET para obtener los productos del carrito
+app.get('/carrito/:iduser', (req, res) => {
+    const { iduser } = req.params;
+
+    getCartItems(iduser, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
+
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
