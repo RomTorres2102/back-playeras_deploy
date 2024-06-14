@@ -26,21 +26,32 @@ db.connect(err => {
 });
 
 // Funciones del modelo de usuario
-const createUser = async (user, password, email, fecha_nacimiento, sexo, callback) => {
+const createUser = async (user, password, email, fecha_nacimiento, sexo, idrol, callback) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo) VALUES (?, ?, ?, ?, ?)';
-        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo], callback);
+        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo, idrol) VALUES (?, ?, ?, ?, ?, ?)';
+        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, 1], callback); // idrol por defecto es 1
     } catch (err) {
         callback(err, null);
     }
 };
 
-const updateUser = async (iduser, user, password, email, fecha_nacimiento, sexo, callback) => {
+const createAdmin = async (user, password, email, fecha_nacimiento, sexo, idrol, callback) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const query = 'UPDATE users SET user = ?, password = ?, email = ?, fecha_nacimiento = ?, sexo = ? WHERE iduser = ?';
-        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, iduser], callback);
+        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo, idrol) VALUES (?, ?, ?, ?, ?, ?)';
+        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, idrol], callback);
+    } catch (err) {
+        callback(err, null);
+    }
+};
+
+
+const updateUser = async (iduser, user, password, email, fecha_nacimiento, sexo, idrol, callback) => {
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const query = 'UPDATE users SET user = ?, password = ?, email = ?, fecha_nacimiento = ?, sexo = ?, idrol = ? WHERE iduser = ?';
+        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, idrol, iduser], callback);
     } catch (err) {
         callback(err, null);
     }
@@ -93,6 +104,11 @@ const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcio
 const deleteProducto = (idproducto, callback) => {
     const query = 'DELETE FROM producto WHERE idproducto = ?';
     db.query(query, [idproducto], callback);
+};
+
+const searchProducto = (nombre, callback) => {
+    const query = 'SELECT * FROM producto WHERE nomprod LIKE ?';
+    db.query(query, [`%${nombre}%`], callback);
 };
 
 // Función del modelo de compra
@@ -172,7 +188,8 @@ app.get('/usuarios', (req, res) => {
 // Endpoint POST para registrar un usuario
 app.post('/nuevo-usuario', async (req, res) => {
     const { user, password, email, fecha_nacimiento, sexo } = req.body;
-    createUser(user, password, email, fecha_nacimiento, sexo, (err, results) => {
+    const idrol = 1; // ID de rol predeterminado
+    createUser(user, password, email, fecha_nacimiento, sexo, idrol, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
@@ -181,11 +198,25 @@ app.post('/nuevo-usuario', async (req, res) => {
     });
 });
 
+// Endpoint POST para registrar un administrador
+app.post('/nuevo-admin', async (req, res) => {
+    const { user, password, email, fecha_nacimiento, sexo } = req.body;
+    const idrol = 2; // ID de rol para administrador
+    createAdmin(user, password, email, fecha_nacimiento, sexo, idrol, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(201).json({ message: 'Admin registrado exitosamente' });
+    });
+});
+
+
 // Endpoint PUT para actualizar un usuario
 app.put('/actualizar-usuario/:iduser', async (req, res) => {
     const { iduser } = req.params;
-    const { user, password, email, fecha_nacimiento, sexo } = req.body;
-    updateUser(iduser, user, password, email, fecha_nacimiento, sexo, (err, results) => {
+    const { user, password, email, fecha_nacimiento, sexo, idrol } = req.body;
+    updateUser(iduser, user, password, email, fecha_nacimiento, sexo, idrol, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
@@ -253,6 +284,7 @@ app.get('/productos', (req, res) => {
         res.status(200).json(results);
     });
 });
+
 //Endpoint POST para agregar producto
 app.post('/nuevo-producto', async (req, res) => {
     const { p_producto, nomprod, clave, descripcion} = req.body;
@@ -262,6 +294,23 @@ app.post('/nuevo-producto', async (req, res) => {
             return;
         }
         res.status(201).json({ message: 'Producto agregado exitosamente' });
+    });
+});
+
+
+// Endpoint GET para buscar producto por nombre
+app.get('/buscar-producto', (req, res) => {
+    const { nombre } = req.query;
+    searchProducto(nombre, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.length === 0) {
+            res.status(404).json({ message: 'Producto no encontrado' });
+            return;
+        }
+        res.status(200).json(results);
     });
 });
 
