@@ -3,6 +3,7 @@ import mysql from 'mysql2';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';    
 
 dotenv.config();
 
@@ -78,7 +79,16 @@ const authenticateUser = async (email, password, callback) => {
             return callback(new Error('Contraseña incorrecta'), null);
         }
 
-        callback(null, user);
+        // Generar remember_token
+        const remember_token = crypto.randomBytes(16).toString('hex');
+        const updateTokenQuery = 'UPDATE users SET remember_token = ? WHERE email = ?';
+        db.query(updateTokenQuery, [remember_token, email], (err) => {
+            if (err) {
+                return callback(err, null);
+            }
+            user.remember_token = remember_token;
+            callback(null, user);
+        });
     });
 };
 
@@ -113,7 +123,7 @@ const searchProducto = (nombre, callback) => {
 
 
 //modelo de compra
-const createCompra = (fecha, iduser, idproducto, callback) => {
+const createCompra = (fecha, iduser, idproducto, cantidad, callback) => {
     // Obtener el precio del producto
     const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
     db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
@@ -124,14 +134,14 @@ const createCompra = (fecha, iduser, idproducto, callback) => {
             return callback(new Error('Producto no encontrado'), null);
         }
 
-        const total = productResults[0].p_producto;
+        const total = productResults[0].p_producto * cantidad;
 
-        const query = 'INSERT INTO compra (total, fecha, iduser, idproducto) VALUES (?, ?, ?, ?)';
-        db.query(query, [total, fecha, iduser, idproducto], callback);
+        const query = 'INSERT INTO compra (total, fecha, iduser, idproducto, cantidad) VALUES (?, ?, ?, ?, ?)';
+        db.query(query, [total, fecha, iduser, idproducto, cantidad], callback);
     });
 };
 
-const updateCompra = (idcompra, fecha, iduser, idproducto, callback) => {
+const updateCompra = (idcompra, fecha, iduser, idproducto, cantidad, callback) => {
     // Obtener el precio del producto
     const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
     db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
@@ -142,13 +152,12 @@ const updateCompra = (idcompra, fecha, iduser, idproducto, callback) => {
             return callback(new Error('Producto no encontrado'), null);
         }
 
-        const total = productResults[0].p_producto;
+        const total = productResults[0].p_producto * cantidad;
 
-        const query = 'UPDATE compra SET total = ?, fecha = ?, iduser = ?, idproducto = ? WHERE idcompra = ?';
-        db.query(query, [total, fecha, iduser, idproducto, idcompra], callback);
+        const query = 'UPDATE compra SET total = ?, fecha = ?, iduser = ?, idproducto = ?, cantidad = ? WHERE idcompra = ?';
+        db.query(query, [total, fecha, iduser, idproducto, cantidad, idcompra], callback);
     });
 };
-
 const deleteCompra = (idcompra, callback) => {
     const query = 'DELETE FROM compra WHERE idcompra = ?';
     db.query(query, [idcompra], callback);
@@ -198,8 +207,8 @@ const updatePermiso = async (idpermiso, nompermiso, clave, callback) => {
 };
 
 
-const deletePermiso = (idrol, callback) => {
-    const query = 'DELETE FROM permiso WHERE idrol = ?';
+const deletePermiso = (idpermiso, callback) => {
+    const query = 'DELETE FROM permiso WHERE idpermiso = ?';
     db.query(query, [idpermiso], callback);
 };
 
@@ -227,64 +236,76 @@ const deleteRolxPermiso = (idrol, idpermiso, callback) => {
     db.query(query, [idrol, idpermiso], callback);
 };
 
-//moodelo carrito de compras
+// Funciones de modelo de Compra Detalle
+const createCompraDetalle = async (idcompra, idproducto, cantidad, callback) => {
+    try {
+        // Verificar si la compra existe
+        const checkCompraQuery = 'SELECT * FROM compra WHERE idcompra = ?';
+        db.query(checkCompraQuery, [idcompra], (compraErr, compraResults) => {
+            if (compraErr) {
+                return callback(compraErr, null);
+            }
+            if (compraResults.length === 0) {
+                return callback(new Error('Compra no encontrada'), null);
+            }
 
-const addToCart = (iduser, idproducto, cantidad, callback) => {
-    // Obtener el precio del producto
-    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
-    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
-        if (productErr) {
-            return callback(productErr, null);
-        }
-        if (productResults.length === 0) {
-            return callback(new Error('Producto no encontrado'), null);
-        }
-        
-        const precio = productResults[0].p_producto;
-        const total = precio * cantidad;
+            // Obtener el precio unitario del producto
+            const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+            db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
+                if (productErr) {
+                    return callback(productErr, null);
+                }
+                if (productResults.length === 0) {
+                    return callback(new Error('Producto no encontrado'), null);
+                }
 
-        const query = 'INSERT INTO carrito (iduser, idproducto, cantidad, total) VALUES (?, ?, ?, ?)';
-        db.query(query, [iduser, idproducto, cantidad, total], callback);
-    });
+                const total = productResults[0].p_producto * cantidad;
+
+                const query = 'INSERT INTO compra_detalle (idcompra, idproducto, cantidad, total) VALUES (?, ?, ?, ?)';
+                db.query(query, [idcompra, idproducto, cantidad, total], callback);
+            });
+        });
+    } catch (err) {
+        callback(err, null);
+    }
 };
 
-const updateCartItem = (iduser, idproducto, cantidad, callback) => {
-    // Obtener el precio del producto
-    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
-    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
-        if (productErr) {
-            return callback(productErr, null);
-        }
-        if (productResults.length === 0) {
-            return callback(new Error('Producto no encontrado'), null);
-        }
-        
-        const precio = productResults[0].p_producto;
-        const total = precio * cantidad;
+const updateCompraDetalle = async (iddetalle, idcompra, idproducto, cantidad, callback) => {
+    try {
+        // Verificar si la compra existe
+        const checkCompraQuery = 'SELECT * FROM compra WHERE idcompra = ?';
+        db.query(checkCompraQuery, [idcompra], (compraErr, compraResults) => {
+            if (compraErr) {
+                return callback(compraErr, null);
+            }
+            if (compraResults.length === 0) {
+                return callback(new Error('Compra no encontrada'), null);
+            }
 
-        const query = 'UPDATE carrito SET cantidad = ?, total = ? WHERE iduser = ? AND idproducto = ?';
-        db.query(query, [cantidad, total, iduser, idproducto], callback);
-    });
+            // Obtener el precio unitario del producto
+            const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+            db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
+                if (productErr) {
+                    return callback(productErr, null);
+                }
+                if (productResults.length === 0) {
+                    return callback(new Error('Producto no encontrado'), null);
+                }
+
+                const total = productResults[0].p_producto * cantidad;
+
+                const query = 'UPDATE compra_detalle SET idcompra = ?, idproducto = ?, cantidad = ?, total = ? WHERE iddetalle = ?';
+                db.query(query, [idcompra, idproducto, cantidad, total, iddetalle], callback);
+            });
+        });
+    } catch (err) {
+        callback(err, null);
+    }
 };
 
-const deleteCartItem = (iduser, idproducto, callback) => {
-    const query = 'DELETE FROM carrito WHERE iduser = ? AND idproducto = ?';
-    db.query(query, [iduser, idproducto], callback);
-};
-
-const getCartItems = (iduser, callback) => {
-    const query = `
-        SELECT 
-            carrito.iduser, 
-            carrito.idproducto, 
-            carrito.cantidad, 
-            carrito.total, 
-            producto.nomprod, 
-            producto.p_producto 
-        FROM carrito 
-        JOIN producto ON carrito.idproducto = producto.idproducto 
-        WHERE carrito.iduser = ?`;
-    db.query(query, [iduser], callback);
+const deleteCompraDetalle = (iddetalle, callback) => {
+    const query = 'DELETE FROM compra_detalle WHERE iddetalle = ?';
+    db.query(query, [iddetalle], callback);
 };
 
 
@@ -385,7 +406,36 @@ app.post('/login', (req, res) => {
             res.status(401).json({ message: err.message });
             return;
         }
-        res.status(200).json({ message: 'Login exitoso', user });
+        res.status(200).json({ message: 'Login exitoso', user, remember_token: user.remember_token });
+    });
+});
+
+
+// endpoint para logout
+app.post('/logout', (req, res) => {
+    const { remember_token } = req.body;
+
+    const query = 'UPDATE users SET remember_token = NULL WHERE remember_token = ?';
+    db.query(query, [remember_token], (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(200).json({ message: 'Logout exitoso' });
+    });
+});
+
+// Endpoint para verificar el token
+app.post('/auth/check-token', (req, res) => {
+    const { token } = req.body;
+
+    const query = 'SELECT * FROM users WHERE remember_token = ?';
+    db.query(query, [token], (err, results) => {
+        if (err || results.length === 0) {
+            res.status(401).json({ message: 'Token inválido' });
+            return;
+        }
+        res.status(200).json({ user: results[0] });
     });
 });
 
@@ -401,15 +451,49 @@ app.get('/productos', (req, res) => {
     });
 });
 
-//Endpoint POST para agregar producto
+// Endpoint POST para agregar producto
 app.post('/nuevo-producto', async (req, res) => {
-    const { p_producto, nomprod, clave, descripcion} = req.body;
+    const { p_producto, nomprod, clave, descripcion } = req.body;
     createProducto(p_producto, nomprod, clave, descripcion, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
         }
         res.status(201).json({ message: 'Producto agregado exitosamente' });
+    });
+});
+
+// Endpoint PUT para actualizar un producto
+app.put('/actualizar-producto/:idproducto', async (req, res) => {
+    const { idproducto } = req.params;
+    const { p_producto, nomprod, clave, descripcion } = req.body;
+    updateProducto(idproducto, p_producto, nomprod, clave, descripcion, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Producto no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Información del producto actualizada exitosamente' });
+    });
+});
+
+
+// Endpoint DELETE para eliminar un producto
+app.delete('/eliminar-producto/:idproducto', (req, res) => {
+    const { idproducto } = req.params;
+    deleteProducto(idproducto, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Producto no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Producto eliminado exitosamente' });
     });
 });
 
@@ -430,38 +514,6 @@ app.get('/buscar-producto', (req, res) => {
     });
 }); 
 
-// Endpoint PUT para actualizar un producto
-app.put('/actualizar-producto/:idproducto', async (req, res) => {
-    const { idproducto } = req.params;
-    const { p_producto, nomprod, clave, descripcion } = req.body;
-    updateProducto(idproducto, p_producto, nomprod, clave, descripcion, (err, results) => {
-        if (err) {
-            res.status(500).send(err);
-            return;
-        }
-        if (results.affectedRows === 0) {
-            res.status(404).json({ message: 'Producto no encontrado' });
-            return;
-        }
-        res.status(200).json({ message: 'Información del producto actualizada exitosamente' });
-    });
-});
-
-// Endpoint DELETE para eliminar un producto
-app.delete('/eliminar-producto/:idproducto', (req, res) => {
-    const { idproducto } = req.params;
-    deleteProducto(idproducto, (err, results) => {
-        if (err) {
-            res.status(500).send(err);
-            return;
-        }
-        if (results.affectedRows === 0) {
-            res.status(404).json({ message: 'Producto no encontrado' });
-            return;
-        }
-        res.status(200).json({ message: 'Producto eliminado exitosamente' });
-    });
-});
 
 // Endpoint GET para obtener todas las compras
 app.get('/compras', (req, res) => {
@@ -471,7 +523,8 @@ app.get('/compras', (req, res) => {
             compra.total, 
             compra.fecha, 
             producto.nomprod as producto,
-            users.user as usuario
+            users.user as usuario,
+            compra.cantidad
         FROM compra
         JOIN users ON compra.iduser = users.iduser
         JOIN producto ON compra.idproducto = producto.idproducto
@@ -488,7 +541,7 @@ app.get('/compras', (req, res) => {
 
 // Endpoint POST para agregar una compra
 app.post('/nueva-compra', (req, res) => {
-    const { fecha, iduser, idproducto } = req.body;
+    const { fecha, iduser, idproducto, cantidad } = req.body;
 
     // Verificar que el usuario exista
     const userQuery = 'SELECT * FROM users WHERE iduser = ?';
@@ -515,7 +568,7 @@ app.post('/nueva-compra', (req, res) => {
             }
 
             // Crear la compra
-            createCompra(fecha, iduser, idproducto, (compraErr, compraResults) => {
+            createCompra(fecha, iduser, idproducto, cantidad, (compraErr, compraResults) => {
                 if (compraErr) {
                     res.status(500).send(compraErr);
                     return;
@@ -529,9 +582,9 @@ app.post('/nueva-compra', (req, res) => {
 // Endpoint PUT para actualizar una compra
 app.put('/actualizar-compra/:idcompra', (req, res) => {
     const { idcompra } = req.params;
-    const { fecha, iduser, idproducto } = req.body;
+    const { fecha, iduser, idproducto, cantidad } = req.body;
 
-    updateCompra(idcompra, fecha, iduser, idproducto, (err, results) => {
+    updateCompra(idcompra, fecha, iduser, idproducto, cantidad, (err, results) => {
         if (err) {
             if (err.message === 'Usuario no encontrado') {
                 res.status(404).json({ message: 'Usuario no encontrado' });
@@ -770,90 +823,68 @@ app.delete('/eliminar-rolxpermiso', async (req, res) => {
     });
 });
 
-// Endpoint POST para agregar un producto al carrito
-app.post('/agregar-al-carrito', async (req, res) => {
-    const { iduser, idproducto, cantidad } = req.body;
-
-    // Verificar que el usuario exista
-    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
-    db.query(userQuery, [iduser], (userErr, userResults) => {
-        if (userErr) {
-            res.status(500).send(userErr);
-            return;
-        }
-        if (userResults.length === 0) {
-            res.status(404).json({ message: 'Usuario no encontrado' });
-            return;
-        }
-
-        // Verificar que el producto exista
-        const productQuery = 'SELECT * FROM producto WHERE idproducto = ?';
-        db.query(productQuery, [idproducto], (productErr, productResults) => {
-            if (productErr) {
-                res.status(500).send(productErr);
-                return;
-            }
-            if (productResults.length === 0) {
-                res.status(404).json({ message: 'Producto no encontrado' });
-                return;
-            }
-
-            // Agregar el producto al carrito
-            addToCart(iduser, idproducto, cantidad, (cartErr, cartResults) => {
-                if (cartErr) {
-                    res.status(500).send(cartErr);
-                    return;
-                }
-                res.status(201).json({ message: 'Producto agregado al carrito exitosamente' });
-            });
-        });
-    });
-});
-
-// Endpoint PUT para actualizar la cantidad de un producto en el carrito
-app.put('/actualizar-carrito', async (req, res) => {
-    const { iduser, idproducto, cantidad } = req.body;
-
-    updateCartItem(iduser, idproducto, cantidad, (updateErr, updateResults) => {
-        if (updateErr) {
-            res.status(500).send(updateErr);
-            return;
-        }
-        if (updateResults.affectedRows === 0) {
-            res.status(404).json({ message: 'Elemento del carrito no encontrado' });
-            return;
-        }
-        res.status(200).json({ message: 'Carrito actualizado exitosamente' });
-    });
-});
-
-// Endpoint DELETE para eliminar un producto del carrito
-app.delete('/eliminar-del-carrito', (req, res) => {
-    const { iduser, idproducto } = req.body;
-
-    deleteCartItem(iduser, idproducto, (deleteErr, deleteResults) => {
-        if (deleteErr) {
-            res.status(500).send(deleteErr);
-            return;
-        }
-        if (deleteResults.affectedRows === 0) {
-            res.status(404).json({ message: 'Elemento del carrito no encontrado' });
-            return;
-        }
-        res.status(200).json({ message: 'Producto eliminado del carrito exitosamente' });
-    });
-});
-
-// Endpoint GET para obtener los productos del carrito
-app.get('/carrito/:iduser', (req, res) => {
-    const { iduser } = req.params;
-
-    getCartItems(iduser, (err, results) => {
+// Endpoint GET para obtener todos los detalles de compra
+app.get('/compras-detalles', (req, res) => {
+    const query = 'SELECT idcompra, idproducto, cantidad, total FROM compra_detalle';
+    db.query(query, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
         }
         res.status(200).json(results);
+    });
+});
+
+// Endpoint POST para agregar un detalle de compra
+app.post('/nuevo-compra-detalle', async (req, res) => {
+    const { idcompra, idproducto, cantidad } = req.body;
+    createCompraDetalle(idcompra, idproducto, cantidad, (err, results) => {
+        if (err) {
+            if (err.message === 'Compra no encontrada' || err.message === 'Producto no encontrado') {
+                res.status(404).json({ message: err.message });
+                return;
+            }
+            res.status(500).send(err);
+            return;
+        }
+        res.status(201).json({ message: 'Detalle de compra agregado exitosamente' });
+    });
+});
+
+// Endpoint PUT para actualizar un detalle de compra
+app.put('/actualizar-compra-detalle/:iddetalle', async (req, res) => {
+    const { iddetalle } = req.params;
+    const { idcompra, idproducto, cantidad } = req.body;
+    updateCompraDetalle(iddetalle, idcompra, idproducto, cantidad, (err, results) => {
+        if (err) {
+            if (err.message === 'Compra no encontrada' || err.message === 'Producto no encontrado') {
+                res.status(404).json({ message: err.message });
+                return;
+            }
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Detalle de compra no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Información del detalle de compra actualizada exitosamente' });
+    });
+});
+
+// Endpoint DELETE para eliminar un detalle de compra
+app.delete('/eliminar-compra-detalle/:iddetalle', (req, res) => {
+    const { iddetalle } = req.params;
+    deleteCompraDetalle(iddetalle, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Detalle de compra no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Detalle de compra eliminado exitosamente' });
     });
 });
 
