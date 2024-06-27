@@ -53,11 +53,11 @@ db.connect(err => {
 });
 
 // Funciones del modelo de usuario
-const createUser = async (user, password, email, fecha_nacimiento, sexo, idrol, callback) => {
+const createUser = async (user, password, email, fecha_nacimiento, sexo, foto, idrol, callback) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo, idrol) VALUES (?, ?, ?, ?, ?, ?)';
-        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, 1], callback); // idrol por defecto es 1
+        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo, foto, idrol) VALUES (?, ?, ?, ?, ?, ?,?)';
+        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, foto, 1], callback); // idrol por defecto es 1
     } catch (err) {
         callback(err, null);
     }
@@ -74,11 +74,11 @@ const createAdmin = async (user, password, email, fecha_nacimiento, sexo, idrol,
 };
 
 
-const updateUser = async (iduser, user, password, email, fecha_nacimiento, sexo, idrol, callback) => {
+const updateUser = async (iduser, user, password, email, fecha_nacimiento, sexo, idrol, foto, callback) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const query = 'UPDATE users SET user = ?, password = ?, email = ?, fecha_nacimiento = ?, sexo = ?, idrol = ? WHERE iduser = ?';
-        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, idrol, iduser], callback);
+        const query = 'UPDATE users SET user = ?, password = ?, email = ?, fecha_nacimiento = ?, sexo = ?, idrol = ?, foto = ? WHERE iduser = ?';
+        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, foto, idrol, iduser], callback);
     } catch (err) {
         callback(err, null);
     }
@@ -347,9 +347,9 @@ app.get('/usuarios', (req, res) => {
 
 // Endpoint POST para registrar un usuario
 app.post('/nuevo-usuario', async (req, res) => {
-    const { user, password, email, fecha_nacimiento, sexo } = req.body;
+    const { user, password, email, fecha_nacimiento, sexo, foto } = req.body;
     const idrol = 1; // ID de rol predeterminado
-    createUser(user, password, email, fecha_nacimiento, sexo, idrol, (err, results) => {
+    createUser(user, password, email, fecha_nacimiento, sexo, foto, idrol, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
@@ -375,8 +375,8 @@ app.post('/nuevo-admin', async (req, res) => {
 // Endpoint PUT para actualizar un usuario
 app.put('/actualizar-usuario/:iduser', async (req, res) => {
     const { iduser } = req.params;
-    const { user, password, email, fecha_nacimiento, sexo, idrol } = req.body;
-    updateUser(iduser, user, password, email, fecha_nacimiento, sexo, idrol, (err, results) => {
+    const { user, password, email, fecha_nacimiento, sexo, foto, idrol } = req.body;
+    updateUser(iduser, user, password, email, fecha_nacimiento, sexo, foto, idrol, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
