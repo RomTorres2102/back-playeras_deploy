@@ -331,8 +331,57 @@ const deleteCompraDetalle = (iddetalle, callback) => {
     db.query(query, [iddetalle], callback);
 };
 
+// Ruta para agregar un comentario
+app.post('/comentarios', (req, res) => {
+    const { idproducto, iduser, comentario } = req.body;
 
+    // Consulta para verificar si el usuario ya ha comentado sobre el producto
+    const checkQuery = 'SELECT * FROM comentarios WHERE idproducto = ? AND iduser = ?';
+    db.query(checkQuery, [idproducto, iduser], (checkErr, checkResults) => {
+        if (checkErr) {
+            console.error('Error al verificar los comentarios existentes:', checkErr);
+            res.status(500).json({ error: 'Error al verificar los comentarios existentes' });
+            return;
+        }
 
+        if (checkResults.length > 0) {
+            // El usuario ya ha comentado sobre este producto
+            res.status(400).json({ error: 'Solo puedes comentar una vez por producto' });
+        } else {
+            // El usuario no ha comentado sobre este producto, proceder a agregar el comentario
+            const query = 'INSERT INTO comentarios (idproducto, iduser, comentario) VALUES (?, ?, ?)';
+            db.query(query, [idproducto, iduser, comentario], (err, results) => {
+                if (err) {
+                    console.error('Error al agregar el comentario:', err);
+                    res.status(500).json({ error: 'Error al agregar el comentario' });
+                    return;
+                }
+                res.status(201).json({ message: 'Comentario agregado correctamente' });
+            });
+        }
+    });
+});
+
+// Ruta para obtener comentarios de un producto
+app.get('/comentarios/:idproducto', (req, res) => {
+    const { idproducto } = req.params;
+
+    const query = `
+        SELECT c.comentario, c.fecha, u.user as user, u.foto as userFoto 
+        FROM comentarios c 
+        JOIN users u ON c.iduser = u.iduser 
+        WHERE c.idproducto = ? 
+        ORDER BY c.fecha DESC
+    `;
+    db.query(query, [idproducto], (err, results) => {
+        if (err) {
+            console.error('Error al obtener los comentarios:', err);
+            res.status(500).json({ error: 'Error al obtener los comentarios' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
 // Endpoint GET para obtener todos los usuarios
 app.get('/usuarios', (req, res) => {
     const query = 'SELECT * FROM users';
