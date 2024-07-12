@@ -56,13 +56,12 @@ db.connect(err => {
 const createUser = async (user, password, email, fecha_nacimiento, sexo, foto, idrol, callback) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo, foto, idrol) VALUES (?, ?, ?, ?, ?, ?,?)';
-        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, foto, 1], callback); // idrol por defecto es 1
+        const query = 'INSERT INTO users (user, password, email, fecha_nacimiento, sexo, foto, idrol) VALUES (?, ?, ?, ?, ?, ?, ?)';
+        db.query(query, [user, hashedPassword, email, fecha_nacimiento, sexo, foto, idrol], callback); // idrol por defecto es 1
     } catch (err) {
         callback(err, null);
     }
 };
-
 const createAdmin = async (user, password, email, fecha_nacimiento, sexo, idrol, callback) => {
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -398,7 +397,8 @@ app.get('/usuarios', (req, res) => {
 app.post('/nuevo-usuario', async (req, res) => {
     const { user, password, email, fecha_nacimiento, sexo, foto } = req.body;
     const idrol = 1; // ID de rol predeterminado
-    createUser(user, password, email, fecha_nacimiento, sexo, foto, idrol, (err, results) => {
+    const defaultFoto = foto || 'uploads/default.jpg'; // Asignar imagen por defecto si no se proporciona una
+    createUser(user, password, email, fecha_nacimiento, sexo, defaultFoto, idrol, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
@@ -406,6 +406,7 @@ app.post('/nuevo-usuario', async (req, res) => {
         res.status(201).json({ message: 'Usuario registrado exitosamente' });
     });
 });
+
 
 // Endpoint POST para registrar un administrador
 app.post('/nuevo-admin', async (req, res) => {
@@ -647,7 +648,15 @@ app.get('/compras/:id', (req, res) => {
 // Endpoint get para obtener una compra por iduser
 app.get('/compras/usuario/:id', (req, res) => {
     const { id } = req.params;
-    const query = 'SELECT producto.nomprod AS producto, compra.cantidad, compra.total FROM compra JOIN producto ON compra.idproducto = producto.idproducto WHERE iduser = ?';
+    const query = `
+        SELECT 
+            producto.nomprod AS producto, 
+            producto.foto AS productoFoto, 
+            compra.cantidad, 
+            compra.total 
+        FROM compra 
+        JOIN producto ON compra.idproducto = producto.idproducto 
+        WHERE iduser = ?`;
     db.query(query, [id], (err, results) => {
         if (err) {
             res.status(500).send(err);
