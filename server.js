@@ -436,6 +436,22 @@ app.put('/actualizar-usuario/:iduser', async (req, res) => {
     });
 });
 
+app.put('/actualizar-perfil/:iduser', async (req, res) => {
+    const { iduser } = req.params;
+    const { user, password, email, fecha_nacimiento, sexo, foto, idrol } = req.body;
+    updateUser(iduser, user, password, email, fecha_nacimiento, sexo, foto, idrol, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Usuario no encontrado' });
+            return;
+        }
+        res.status(200).json({ message: 'Usuario actualizado exitosamente' });
+    });
+});
+
 // Endpoint DELETE para eliminar un usuario
 app.delete('/eliminar-usuario/:iduser', (req, res) => {
     const { iduser } = req.params;
@@ -452,6 +468,22 @@ app.delete('/eliminar-usuario/:iduser', (req, res) => {
     });
 });
 // Endpoint GET para obtener un usuario por ID
+app.get('/perfil-usuario/:id', (req, res) => {
+    const { id } = req.params;
+    const query = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(query, [id], (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.length === 0) {
+            res.status(404).json({ message: 'Usuario no encontrado' });
+            return;
+        }
+        res.status(200).json(results[0]);
+    });
+});
+
 app.get('/usuarios/:id', (req, res) => {
     const { id } = req.params;
     const query = 'SELECT * FROM users WHERE iduser = ?';
