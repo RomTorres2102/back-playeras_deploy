@@ -30,12 +30,31 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // Endpoint para subir la imagen
-app.post('/upload', upload.single('file'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ message: 'No se subió ningún archivo' });
+app.post('/upload', upload.fields([
+  { name: 'foto', maxCount: 1 },
+  { name: 'foto2', maxCount: 1 },
+  { name: 'foto3', maxCount: 1 }
+]), (req, res) => {
+  if (!req.files) {
+    return res.status(400).json({ message: 'No se subieron archivos' });
   }
-  res.status(200).json({ filepath: `uploads/${req.file.filename}` });
+
+  // Obtener los archivos subidos
+  const filepaths = {
+    foto: req.files['foto'] ? `uploads/${req.files['foto'][0].filename}` : '',
+    foto2: req.files['foto2'] ? `uploads/${req.files['foto2'][0].filename}` : '',
+    foto3: req.files['foto3'] ? `uploads/${req.files['foto3'][0].filename}` : ''
+  };
+
+  // Filtrar solo los campos con archivos subidos
+  const filteredFilepaths = Object.fromEntries(
+    Object.entries(filepaths).filter(([key, value]) => value !== '')
+  );
+
+  // Responder con las rutas de los archivos subidos
+  res.status(200).json(filteredFilepaths);
 });
+
 
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
@@ -117,20 +136,57 @@ const authenticateUser = async (email, password, callback) => {
     });
 };
 
-// Funciones de modelo de Productos
-const createProducto = async (p_producto, nomprod, clave, descripcion, foto, callback) => {
+// Función para contar productos
+const countProducto = async (callback) => {
   try {
-    const query = 'INSERT INTO producto (p_producto, nomprod, clave, descripcion, foto) VALUES (?, ?, ?, ?, ?)';
-    db.query(query, [p_producto, nomprod, clave, descripcion, foto], callback);
+    const query = 'SELECT COUNT(*) AS total_productos FROM producto';
+    db.query(query, callback);
   } catch (err) {
     callback(err, null);
   }
 };
 
-const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, callback) => {
+// Funciones de modelo de Emails
+const createEmail = async (nombre, asunto, correo, mensaje, callback) => {
   try {
-    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ? WHERE idproducto = ?';
-    db.query(query, [p_producto, nomprod, clave, descripcion, foto, idproducto], callback);
+    const query = 'INSERT INTO emails (nombre, asunto, correo, mensaje) VALUES (?, ?, ?, ?)';
+    db.query(query, [nombre, asunto, correo, mensaje], callback);
+  } catch (err) {
+    callback(err, null);
+  }
+};
+// Función para actualizar un email
+const updateEmail = async (idemail, nombre, asunto, correo, mensaje, callback) => {
+  try {
+    const query = 'UPDATE emails SET nombre = ?, asunto = ?, correo = ?, mensaje = ? WHERE idemail = ?';
+    db.query(query, [nombre, asunto, correo, mensaje, idemail], callback);
+  } catch (err) {
+    callback(err, null);
+  }
+};
+// Función para eliminar un email
+const deleteEmail = async (idemail, callback) => {
+  try {
+    const query = 'DELETE FROM emails WHERE idemail = ?';
+    db.query(query, [idemail], callback);
+  } catch (err) {
+    callback(err, null);
+  }
+};
+// Funciones de modelo de Productos
+const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, callback) => {
+  try {
+    const query = 'INSERT INTO producto (p_producto, nomprod, clave, descripcion, foto, foto2, foto3) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3], callback);
+  } catch (err) {
+    callback(err, null);
+  }
+};
+
+const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, callback) => {
+  try {
+    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ? WHERE idproducto = ?';
+    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, idproducto], callback);
   } catch (err) {
     callback(err, null);
   }
@@ -358,6 +414,98 @@ app.post('/comentarios', (req, res) => {
     });
 });
 
+// Crear una nueva entrada en el carrusel
+const createSlide = (foto, callback) => {
+    const query = 'INSERT INTO carrusel (foto) VALUES (?)';
+    db.query(query, [foto], callback);
+};
+
+// Actualizar una entrada del carrusel
+const updateSlide = (idfoto, foto, callback) => {
+    const query = 'UPDATE carrusel SET foto = ? WHERE idfoto = ?';
+    db.query(query, [foto, idfoto], callback);
+};
+
+// Eliminar una entrada del carrusel
+const deleteSlide = (idfoto, callback) => {
+    const query = 'DELETE FROM carrusel WHERE idfoto = ?';
+    db.query(query, [idfoto], callback);
+};
+
+// Endpoint GET para obtener todas las fotos del carrusel
+app.get('/carrusel', (req, res) => {
+    const query = 'SELECT * FROM carrusel';
+    db.query(query, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
+// Endpoint GET para obtener una foto específica del carrusel por ID
+app.get('/carrusel/:idfoto', (req, res) => {
+    const { idfoto } = req.params;
+    const query = 'SELECT * FROM carrusel WHERE idfoto = ?';
+    db.query(query, [idfoto], (err, result) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (result.length === 0) {
+            res.status(404).json({ message: 'Foto no encontrada' });
+            return;
+        }
+        res.status(200).json(result[0]);
+    });
+});
+
+// Endpoint POST para agregar una nueva foto al carrusel
+app.post('/nuevo-carrusel', (req, res) => {
+    const { foto } = req.body;
+    createSlide(foto, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        res.status(201).json({ message: 'Foto agregada exitosamente', idfoto: results.insertId });
+    });
+});
+
+// Endpoint PUT para actualizar una foto del carrusel
+app.put('/actualizar-carrusel/:idfoto', (req, res) => {
+    const { idfoto } = req.params;
+    const { foto } = req.body;
+    updateSlide(idfoto, foto, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Foto no encontrada' });
+            return;
+        }
+        res.status(200).json({ message: 'Foto actualizada exitosamente' });
+    });
+});
+
+// Endpoint DELETE para eliminar una foto del carrusel
+app.delete('/eliminar-carrusel/:idfoto', (req, res) => {
+    const { idfoto } = req.params;
+    deleteSlide(idfoto, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Foto no encontrada' });
+            return;
+        }
+        res.status(200).json({ message: 'Foto eliminada exitosamente' });
+    });
+});
+
 // Ruta para obtener comentarios de un producto
 app.get('/comentarios/:idproducto', (req, res) => {
     const { idproducto } = req.params;
@@ -541,9 +689,33 @@ app.post('/auth/check-token', (req, res) => {
     });
 });
 
+// Ruta para contar productos
+app.get('/contar-productos', (req, res) => {
+  countProducto((err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results[0]);
+  });
+});
+
+
 // Endpoint GET para obtener todos los productos
 app.get('/productos', (req, res) => {
   const query = 'SELECT * FROM producto';
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+
+// Endpoint para obtener los primeros 4 registros más recientes
+app.get('/productos-recientes', (req, res) => {
+  const query = 'SELECT * FROM producto ORDER BY created_at DESC LIMIT 4';
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send(err);
@@ -572,21 +744,20 @@ app.get('/productos/:id', (req, res) => {
 
 // Endpoint POST para agregar producto
 app.post('/nuevo-producto', async (req, res) => {
-    const { p_producto, nomprod, clave, descripcion, foto } = req.body;
-    createProducto(p_producto, nomprod, clave, descripcion, foto, (err, results) => {
-        if (err) {
-            res.status(500).send(err);
-            return;
-        }
-        res.status(201).json({ message: 'Producto agregado exitosamente' });
-    });
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3 } = req.body;
+  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(201).json({ message: 'Producto agregado exitosamente' });
+  });
 });
-
 // Endpoint PUT para actualizar un producto
 app.put('/actualizar-producto/:idproducto', async (req, res) => {
   const { idproducto } = req.params;
-  const { p_producto, nomprod, clave, descripcion, foto } = req.body;
-  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, (err, results) => {
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3 } = req.body;
+  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -631,7 +802,113 @@ app.get('/buscar-producto', (req, res) => {
         res.status(200).json(results);
     });
 }); 
+//endpoint para obtener las claves
+app.get('/claves-productos', (req, res) => {
+  const query = 'SELECT DISTINCT clave FROM producto';
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+//endpoint para obtener un producto por clave
+app.get('/clave-producto/:clave', (req, res) => {
+  const { clave } = req.params;
+  const query = 'SELECT * FROM producto WHERE clave = ?';
+  db.query(query, [clave], (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+// Endpoint para obtener productos aleatorios por clave
+app.get('/productos-aleatorios/:id/:clave', (req, res) => {
+  const { id, clave } = req.params;
+  const query = `
+    SELECT * 
+    FROM producto 
+    WHERE clave = ? AND idproducto != ? 
+    ORDER BY RAND() 
+    LIMIT 4`; // Limitamos los resultados a 4
 
+  db.query(query, [clave, id], (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+// Endpoint GET para obtener todos los emails
+app.get('/emails', (req, res) => {
+  const query = 'SELECT * FROM emails';
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+// Endpoint para resetear emails
+app.post('/resetear-emails', (req, res) => {
+  const query = 'ALTER TABLE emails AUTO_INCREMENT = 1';
+
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send({ error: 'Error al reiniciar el contador de autoincremento', details: err });
+      return;
+    }
+    res.status(200).json({ message: 'Contador de autoincremento reiniciado correctamente' });
+  });
+});
+
+// Endpoint POST para crear un nuevo email
+app.post('/nuevo-email', (req, res) => {
+  const { nombre, asunto, correo, mensaje } = req.body;
+
+  createEmail(nombre, asunto, correo, mensaje, (err, result) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(201).json({ message: 'Email creado correctamente' });
+  });
+});
+
+// Endpoint PUT para actualizar un email
+app.put('/actualizar-email/:idemail', (req, res) => {
+  const { idemail } = req.params;
+  const { nombre, asunto, correo, mensaje } = req.body;
+
+  updateEmail(idemail, nombre, asunto, correo, mensaje, (err, result) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json({ message: 'Email actualizado correctamente' });
+  });
+});
+
+// Endpoint DELETE para eliminar un email
+app.delete('/eliminar-email/:idemail', (req, res) => {
+  const { idemail } = req.params;
+
+  deleteEmail(idemail, (err, result) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Email no encontrado' });
+    }
+    res.status(200).json({ message: 'Email eliminado correctamente' });
+  });
+});
 
 // Endpoint GET para obtener todas las compras
 app.get('/compras', (req, res) => {
