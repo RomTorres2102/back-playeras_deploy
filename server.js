@@ -537,7 +537,7 @@ app.get('/mejores-productos', (req, res) => {
     FROM 
       compra
     JOIN 
-      Producto ON Compra.idproducto = Producto.idproducto
+      producto ON compra.idproducto = producto.idproducto
     GROUP BY 
       nomprod, foto
     ORDER BY 
