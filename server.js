@@ -535,7 +535,7 @@ app.get('/mejores-productos', (req, res) => {
       nomprod, 
       COUNT(*) AS total_ventas
     FROM 
-      Compra
+      compra
     JOIN 
       Producto ON Compra.idproducto = Producto.idproducto
     GROUP BY 
@@ -570,7 +570,7 @@ app.get('/total-compras', (req, res) => {
 
 // Endpoint para obtener el total de dinero de compras
 app.get('/total-dinero-compras', (req, res) => {
-  const query = 'SELECT SUM(total) AS total_dinero_compras FROM Compra';
+  const query = 'SELECT SUM(total) AS total_dinero_compras FROM compra';
 
   db.query(query, (err, result) => {
     if (err) {
