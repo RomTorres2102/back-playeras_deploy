@@ -175,19 +175,25 @@ const deleteEmail = async (idemail, callback) => {
   }
 };
 // Funciones de modelo de Productos
-const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, callback) => {
+const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, callback) => {
   try {
-    const query = 'INSERT INTO producto (p_producto, nomprod, clave, descripcion, foto, foto2, foto3) VALUES (?, ?, ?, ?, ?, ?, ?)';
-    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3], callback);
+    // Calculamos p_final basado en el descuento
+    const p_final = p_producto - (p_producto * (descuento / 100));
+
+    const query = 'INSERT INTO producto (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final], callback);
   } catch (err) {
     callback(err, null);
   }
 };
 
-const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, callback) => {
+const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, callback) => {
   try {
-    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ? WHERE idproducto = ?';
-    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, idproducto], callback);
+    // Calculamos p_final basado en el descuento
+    const p_final = p_producto - (p_producto * (descuento / 100));
+
+    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ?, descuento = ?, p_final = ? WHERE idproducto = ?';
+    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final, idproducto], callback);
   } catch (err) {
     callback(err, null);
   }
@@ -204,11 +210,9 @@ const searchProducto = (nombre, callback) => {
 };
 
 
-// Modelo para crear una compra
-const createCompra = (fecha, idproducto, cantidad, callback) => {
-    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
-    
-    // Obtener el precio del producto
+//modelo de compra
+const createCompra = (fecha, iduser, idproducto, cantidad, callback) => {
+    const getProductPriceQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
     db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
         if (productErr) {
             return callback(productErr, null);
@@ -217,18 +221,16 @@ const createCompra = (fecha, idproducto, cantidad, callback) => {
             return callback(new Error('Producto no encontrado'), null);
         }
 
-        const total = productResults[0].p_producto * cantidad;
+        const total = productResults[0].p_final * cantidad;
 
-        const query = 'INSERT INTO compra (total, fecha, idproducto, cantidad) VALUES (?, ?, ?, ?)';
-        db.query(query, [total, fecha, idproducto, cantidad], callback);
+        const query = 'INSERT INTO compra (total, fecha, iduser, idproducto, cantidad) VALUES (?, ?, ?, ?, ?)';
+        db.query(query, [total, fecha, iduser, idproducto, cantidad], callback);
     });
 };
 
-// Modelo para actualizar una compra
-const updateCompra = (idcompra, fecha, idproducto, cantidad, callback) => {
-    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
-    
+const updateCompra = (idcompra, fecha, iduser, idproducto, cantidad, callback) => {
     // Obtener el precio del producto
+    const getProductPriceQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
     db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
         if (productErr) {
             return callback(productErr, null);
@@ -237,14 +239,12 @@ const updateCompra = (idcompra, fecha, idproducto, cantidad, callback) => {
             return callback(new Error('Producto no encontrado'), null);
         }
 
-        const total = productResults[0].p_producto * cantidad;
+        const total = productResults[0].p_final * cantidad;
 
-        const query = 'UPDATE compra SET total = ?, fecha = ?, idproducto = ?, cantidad = ? WHERE idcompra = ?';
-        db.query(query, [total, fecha, idproducto, cantidad, idcompra], callback);
+        const query = 'UPDATE compra SET total = ?, fecha = ?, iduser = ?, idproducto = ?, cantidad = ? WHERE idcompra = ?';
+        db.query(query, [total, fecha, iduser, idproducto, cantidad, idcompra], callback);
     });
 };
-
-// Modelo para eliminar una compra
 const deleteCompra = (idcompra, callback) => {
     const query = 'DELETE FROM compra WHERE idcompra = ?';
     db.query(query, [idcompra], callback);
@@ -335,7 +335,7 @@ const createCompraDetalle = (idcompra, idproducto, cantidad, callback) => {
             return callback(new Error('Compra no encontrada'), null);
         }
 
-        const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+        const getProductPriceQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
         db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
             if (productErr) {
                 return callback(productErr, null);
@@ -344,7 +344,7 @@ const createCompraDetalle = (idcompra, idproducto, cantidad, callback) => {
                 return callback(new Error('Producto no encontrado'), null);
             }
 
-            const total = productResults[0].p_producto * cantidad;
+            const total = productResults[0].p_final * cantidad;
 
             const query = 'INSERT INTO compra_detalle (idcompra, idproducto, cantidad, total) VALUES (?, ?, ?, ?)';
             db.query(query, [idcompra, idproducto, cantidad, total], callback);
@@ -365,7 +365,7 @@ const updateCompraDetalle = async (iddetalle, idcompra, idproducto, cantidad, ca
             }
 
             // Obtener el precio unitario del producto
-            const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
+            const getProductPriceQuery = 'SELECT p_finalFROM producto WHERE idproducto = ?';
             db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
                 if (productErr) {
                     return callback(productErr, null);
@@ -374,7 +374,7 @@ const updateCompraDetalle = async (iddetalle, idcompra, idproducto, cantidad, ca
                     return callback(new Error('Producto no encontrado'), null);
                 }
 
-                const total = productResults[0].p_producto * cantidad;
+                const total = productResults[0].p_final * cantidad;
 
                 const query = 'UPDATE compra_detalle SET idcompra = ?, idproducto = ?, cantidad = ?, total = ? WHERE iddetalle = ?';
                 db.query(query, [idcompra, idproducto, cantidad, total, iddetalle], callback);
@@ -837,6 +837,20 @@ app.get('/contar-productos', (req, res) => {
   });
 });
 
+//Endpoint para contar los productos con descuento
+
+app.get('/contar-productos-con-descuento', (req, res) => {
+  const query = 'SELECT COUNT(*) as total FROM producto WHERE descuento > 0';
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results[0]);
+  });
+});
+
 
 // Endpoint GET para obtener todos los productos
 app.get('/productos', (req, res) => {
@@ -862,6 +876,19 @@ app.get('/productos-recientes', (req, res) => {
   });
 });
 
+//Endpoint para obtener los productos con descuentos
+app.get('/productos-con-descuento', (req, res) => {
+  const query = 'SELECT * FROM producto WHERE descuento > 0';
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+
+
 // Endpoint para obtener un producto por ID
 app.get('/productos/:id', (req, res) => {
   const { id } = req.params;
@@ -881,8 +908,12 @@ app.get('/productos/:id', (req, res) => {
 
 // Endpoint POST para agregar producto
 app.post('/nuevo-producto', async (req, res) => {
-  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3 } = req.body;
-  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, (err, results) => {
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento } = req.body;
+
+  // Validar si se ha enviado un descuento, de lo contrario poner 0
+  const descuentoAplicado = descuento || 0;
+
+  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado, (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -890,11 +921,16 @@ app.post('/nuevo-producto', async (req, res) => {
     res.status(201).json({ message: 'Producto agregado exitosamente' });
   });
 });
+
 // Endpoint PUT para actualizar un producto
 app.put('/actualizar-producto/:idproducto', async (req, res) => {
   const { idproducto } = req.params;
-  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3 } = req.body;
-  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, (err, results) => {
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento } = req.body;
+
+  // Validar si se ha enviado un descuento, de lo contrario poner 0
+  const descuentoAplicado = descuento || 0;
+
+  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado, (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -939,6 +975,23 @@ app.get('/buscar-producto', (req, res) => {
         res.status(200).json(results);
     });
 }); 
+
+// Endpoint GET para buscar productos con descuento por nombre
+app.get('/buscar-producto-descuento', (req, res) => {
+    const { nombre } = req.query;
+    const query = 'SELECT * FROM producto WHERE nomprod LIKE ? AND descuento > 0';
+    db.query(query, [`%${nombre}%`], (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.length === 0) {
+            res.status(404).json({ message: 'Producto no encontrado' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
 //endpoint para obtener las claves
 app.get('/claves-productos', (req, res) => {
   const query = 'SELECT DISTINCT clave FROM producto';
@@ -962,6 +1015,33 @@ app.get('/clave-producto/:clave', (req, res) => {
     res.status(200).json(results);
   });
 });
+
+// Endpoint para obtener las claves de los productos con descuento
+app.get('/claves-productos-con-descuento', (req, res) => {
+  const query = 'SELECT clave FROM producto WHERE descuento > 0';
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+
+// Endpoint para obtener productos con descuento por clave
+app.get('/clave-producto-con-descuento/:clave', (req, res) => {
+  const { clave } = req.params;
+  const query = 'SELECT * FROM producto WHERE clave = ? AND descuento > 0';
+  db.query(query, [clave], (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+
+
 // Endpoint para obtener productos aleatorios por clave
 app.get('/productos-aleatorios/:id/:clave', (req, res) => {
   const { id, clave } = req.params;
@@ -1055,8 +1135,10 @@ app.get('/compras', (req, res) => {
             compra.total, 
             compra.fecha, 
             producto.nomprod as producto,
+            users.email as usuario,
             compra.cantidad
         FROM compra
+        JOIN users ON compra.iduser = users.iduser
         JOIN producto ON compra.idproducto = producto.idproducto
     `;
     
@@ -1079,40 +1161,143 @@ app.get('/compras/:id', (req, res) => {
             return;
         }
         if (results.length === 0) {
-            res.status(404).json({ message: 'Compra no encontrada' });
+            res.status(404).json({ message: 'compra no encontrado' });
             return;
         }
         res.status(200).json(results[0]);
     });
 });
 
+// Endpoint get para obtener una compra por iduser
+app.get('/compras/usuario/:id', (req, res) => {
+    const { id } = req.params;
+    const query = `
+        SELECT 
+            producto.nomprod AS producto, 
+            producto.foto AS productoFoto, 
+            compra.cantidad, 
+            compra.total 
+        FROM compra 
+        JOIN producto ON compra.idproducto = producto.idproducto 
+        WHERE iduser = ?`;
+    db.query(query, [id], (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.length === 0) {
+            res.status(404).json({ message: 'Este usuario no ha realizado compras' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
+
 // Endpoint POST para agregar una compra
-app.post('/nueva-compra', (req, res) => {
-    const { fecha, idproducto, cantidad } = req.body;
+app.post('/nueva-compra-producto', (req, res) => {
+    const { fecha, iduser, idproducto, cantidad } = req.body;
 
-    // Verificar que el producto exista
-    const productQuery = 'SELECT * FROM producto WHERE idproducto = ?';
-    db.query(productQuery, [idproducto], (productErr, productResults) => {
-        if (productErr) {
-            res.status(500).send(productErr);
+    // Verificar que el usuario exista
+    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(userQuery, [iduser], (userErr, userResults) => {
+        if (userErr) {
+            res.status(500).send(userErr);
             return;
         }
-        if (productResults.length === 0) {
-            res.status(404).json({ message: 'Producto no encontrado' });
+        if (userResults.length === 0) {
+            res.status(404).json({ message: 'Usuario no encontrado' });
             return;
         }
 
-        // Calcular el total de la compra
-        const total = productResults[0].p_producto * cantidad;
-
-        // Crear la compra
-        const query = 'INSERT INTO compra (total, fecha, idproducto, cantidad) VALUES (?, ?, ?, ?)';
-        db.query(query, [total, fecha, idproducto, cantidad], (err, results) => {
-            if (err) {
-                res.status(500).send(err);
+        // Verificar que el producto exista
+        const productQuery = 'SELECT * FROM producto WHERE idproducto = ?';
+        db.query(productQuery, [idproducto], (productErr, productResults) => {
+            if (productErr) {
+                res.status(500).send(productErr);
                 return;
             }
-            res.status(201).json({ message: 'Compra realizada exitosamente' });
+            if (productResults.length === 0) {
+                res.status(404).json({ message: 'Producto no encontrado' });
+                return;
+            }
+
+            // Crear la compra
+            createCompra(fecha, iduser, idproducto, cantidad, (compraErr, compraResults) => {
+                if (compraErr) {
+                    res.status(500).send(compraErr);
+                    return;
+                }
+
+                const idcompra = compraResults.insertId;
+
+                // Crear el detalle de compra
+                createCompraDetalle(idcompra, idproducto, cantidad, (detalleErr, detalleResults) => {
+                    if (detalleErr) {
+                        res.status(500).send(detalleErr);
+                        return;
+                    }
+                    res.status(201).json({ message: 'Compra y detalle de compra realizados exitosamente' });
+                });
+            });
+        });
+    });
+});
+
+//comprar varios productos
+
+app.post('/nueva-compra', (req, res) => {
+    const { fecha, iduser, productos } = req.body;
+
+    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(userQuery, [iduser], (userErr, userResults) => {
+        if (userErr) {
+            res.status(500).send(userErr);
+            return;
+        }
+        if (userResults.length === 0) {
+            res.status(404).json({ message: 'Usuario no encontrado' });
+            return;
+        }
+
+        const productIds = productos.map(producto => producto.idproducto);
+        const productQuery = 'SELECT idproducto FROM producto WHERE idproducto IN (?)';
+        db.query(productQuery, [productIds], (productErr, productResults) => {
+            if (productErr) {
+                res.status(500).send(productErr);
+                return;
+            }
+            if (productResults.length !== productos.length) {
+                res.status(404).json({ message: 'Uno o más productos no encontrados' });
+                return;
+            }
+
+            const promises = productos.map(producto => {
+                return new Promise((resolve, reject) => {
+                    createCompra(fecha, iduser, producto.idproducto, producto.cantidad, (compraErr, compraResults) => {
+                        if (compraErr) {
+                            reject(compraErr);
+                        } else {
+                            const idcompra = compraResults.insertId;
+                            createCompraDetalle(idcompra, producto.idproducto, producto.cantidad, (detalleErr, detalleResults) => {
+                                if (detalleErr) {
+                                    reject(detalleErr);
+                                } else {
+                                    resolve();
+                                }
+                            });
+                        }
+                    });
+                });
+            });
+
+            Promise.all(promises)
+                .then(() => {
+                    res.status(201).json({ message: 'Compras y detalles de compra realizados exitosamente' });
+                })
+                .catch((err) => {
+                    res.status(500).send(err);
+                });
         });
     });
 });
@@ -1120,34 +1305,24 @@ app.post('/nueva-compra', (req, res) => {
 // Endpoint PUT para actualizar una compra
 app.put('/actualizar-compra/:idcompra', (req, res) => {
     const { idcompra } = req.params;
-    const { fecha, idproducto, cantidad } = req.body;
+    const { fecha, iduser, idproducto, cantidad } = req.body;
 
-    // Obtener el precio del producto y actualizar la compra
-    const getProductPriceQuery = 'SELECT p_producto FROM producto WHERE idproducto = ?';
-    db.query(getProductPriceQuery, [idproducto], (productErr, productResults) => {
-        if (productErr) {
-            res.status(500).send(productErr);
-            return;
-        }
-        if (productResults.length === 0) {
-            res.status(404).json({ message: 'Producto no encontrado' });
-            return;
-        }
-
-        const total = productResults[0].p_producto * cantidad;
-
-        const query = 'UPDATE compra SET total = ?, fecha = ?, idproducto = ?, cantidad = ? WHERE idcompra = ?';
-        db.query(query, [total, fecha, idproducto, cantidad, idcompra], (err, results) => {
-            if (err) {
+    updateCompra(idcompra, fecha, iduser, idproducto, cantidad, (err, results) => {
+        if (err) {
+            if (err.message === 'Usuario no encontrado') {
+                res.status(404).json({ message: 'Usuario no encontrado' });
+            } else if (err.message === 'Producto no encontrado') {
+                res.status(404).json({ message: 'Producto no encontrado' });
+            } else {
                 res.status(500).send(err);
-                return;
             }
-            if (results.affectedRows === 0) {
-                res.status(404).json({ message: 'Compra no encontrada' });
-                return;
-            }
-            res.status(200).json({ message: 'Compra actualizada exitosamente' });
-        });
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Compra no encontrada' });
+            return;
+        }
+        res.status(200).json({ message: 'Compra actualizada exitosamente' });
     });
 });
 
@@ -1155,8 +1330,7 @@ app.put('/actualizar-compra/:idcompra', (req, res) => {
 app.delete('/eliminar-compra/:idcompra', (req, res) => {
     const { idcompra } = req.params;
 
-    const query = 'DELETE FROM compra WHERE idcompra = ?';
-    db.query(query, [idcompra], (err, results) => {
+    deleteCompra(idcompra, (err, results) => {
         if (err) {
             res.status(500).send(err);
             return;
