@@ -5,12 +5,15 @@ import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';  
 import multer from 'multer'; 
+import Stripe from 'stripe';
 import path from 'path'; 
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
+
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const __dirname = dirname(__filename);
 const app = express();
 app.use(cors());
@@ -71,6 +74,26 @@ db.connect(err => {
     }
     console.log('Conectado a la base de datos');
 });
+
+
+// Función para crear un cupón
+const createCupon = (porcentaje, codigo, fecha_expiracion, usos_maximos, activo, callback) => {
+    const query = 'INSERT INTO cupones (porcentaje, codigo, fecha_expiracion, usos_maximos, activo) VALUES (?, ?, ?, ?, ?)';
+    db.query(query, [porcentaje, codigo, fecha_expiracion, usos_maximos, activo], callback);
+};
+
+// Actualizar cupón
+const updateCupon = (idcupon, porcentaje, codigo, fecha_expiracion, usos_maximos, activo, callback) => {
+    const query = 'UPDATE cupones SET porcentaje = ?, codigo = ?, fecha_expiracion = ?, usos_maximos = ?, activo = ? WHERE idcupon = ?';
+    db.query(query, [porcentaje, codigo, fecha_expiracion, usos_maximos, activo, idcupon], callback);
+};
+
+// Eliminar cupón
+const deleteCupon = (idcupon, callback) => {
+    const query = 'DELETE FROM cupones WHERE idcupon = ?';
+    db.query(query, [idcupon], callback);
+};
+
 
 // Funciones del modelo de usuario
 const createUser = async (user, password, email, fecha_nacimiento, sexo, foto, idrol, callback) => {
@@ -1692,7 +1715,112 @@ app.delete('/eliminar-compra-detalle/:iddetalle', (req, res) => {
     });
 });
 
+// Endpoint POST para crear un pago
+app.post('/crear-pago', async (req, res) => {
+    const { iduser, productos } = req.body;
 
+    try {
+        // Verificar que el usuario existe
+        const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+        db.query(userQuery, [iduser], (userErr, userResults) => {
+            if (userErr) {
+                res.status(500).send(userErr);
+                return;
+            }
+            if (userResults.length === 0) {
+                res.status(404).json({ message: 'Usuario no encontrado' });
+                return;
+            }
+
+            // Calcular el total de la compra
+            const total = productos.reduce((acc, producto) => acc + producto.precio * producto.cantidad, 0);
+
+            // Crear el PaymentIntent en Stripe
+            stripe.paymentIntents.create({
+                amount: total * 100, // Stripe usa centavos
+                currency: 'usd',
+                metadata: { iduser }, // Opcional: Añadir información adicional
+            }).then(paymentIntent => {
+                res.status(200).json({
+                    clientSecret: paymentIntent.client_secret,
+                    paymentIntentId: paymentIntent.id,
+                });
+            }).catch(err => {
+                res.status(500).json({ message: 'Error creando el pago con Stripe', error: err });
+            });
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error procesando el pago', error });
+    }
+});
+
+app.get('/cupones', (req, res) => {
+    const query = 'SELECT * FROM cupones'; // Consulta para obtener todos los cupones
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        res.status(200).json(results); // Devuelve todos los cupones en formato JSON
+    });
+});
+
+
+// Endpoint POST para crear un cupón
+app.post('/nuevo-cupon', (req, res) => {
+    const { porcentaje, codigo, fecha_expiracion, usos_maximos, activo } = req.body;
+    createCupon(porcentaje, codigo, fecha_expiracion, usos_maximos, activo, (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        res.status(201).json({ message: 'Cupón creado exitosamente' });
+    });
+});
+
+// Endpoint PUT para actualizar un cupón
+app.put('/actualizar-cupon/:idcupon', (req, res) => {
+    const { idcupon } = req.params;
+    const { porcentaje, codigo, fecha_expiracion, usos_maximos, activo } = req.body;
+    updateCupon(idcupon, porcentaje, codigo, fecha_expiracion, usos_maximos, activo, (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ message: 'Cupón no encontrado' });
+        }
+        res.status(200).json({ message: 'Cupón actualizado exitosamente' });
+    });
+});
+
+// Endpoint DELETE para eliminar un cupón
+app.delete('/eliminar-cupon/:idcupon', (req, res) => {
+    const { idcupon } = req.params;
+    deleteCupon(idcupon, (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ message: 'Cupón no encontrado' });
+        }
+        res.status(200).json({ message: 'Cupón eliminado exitosamente' });
+    });
+});
+
+// Endpoint GET para obtener un cupón por ID
+app.get('/cupones/:idcupon', (req, res) => {
+    const { idcupon } = req.params;
+    const query = 'SELECT * FROM cupones WHERE idcupon = ?';
+
+    db.query(query, [idcupon], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'Cupón no encontrado' });
+        }
+        res.status(200).json(results[0]);
+    });
+});
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
