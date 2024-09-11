@@ -232,6 +232,57 @@ const searchProducto = (nombre, callback) => {
     db.query(query, [`%${nombre}%`], callback);
 };
 
+//prueba de compras en formato Json
+
+//modelo de crear compras
+const createCompras = (fecha, iduser, productos, callback) => {
+    const query = 'INSERT INTO compras (iduser, productos, total, fecha) VALUES (?, ?, ?, ?)';
+    db.query(query, [iduser, JSON.stringify(productos), calcularTotal(productos), fecha], callback);
+};
+
+
+const updateCompras = (idcompra, fecha, iduser, productos, callback) => {
+    // Actualizar la compra principal
+    const query = 'UPDATE compras SET fecha = ?, iduser = ?, productos = ?, total = ? WHERE idcompra = ?';
+    db.query(query, [fecha, iduser, JSON.stringify(productos), calcularTotal(productos), idcompra], callback);
+};
+
+// Modelo de eliminación de compras
+const deleteCompras = (idcompra, callback) => {
+    const query = 'DELETE FROM compras WHERE idcompra = ?';
+    db.query(query, [idcompra], callback);
+};
+
+
+//modelo compras detalle con JSON
+
+// Función para insertar los detalles de compra en la base de datos
+const createComprasDetalles = (idcompra, productos, callback) => {
+    const query = 'INSERT INTO compras_detalle (idcompra, productos, total) VALUES (?, ?, ?)';
+    db.query(query, [idcompra, JSON.stringify(productos), calcularTotal(productos)], callback);
+};
+
+
+const updateComprasDetalles = (iddetalle, idcompra, productos, callback) => {
+    // Actualizar el detalle de la compra
+    const query = 'UPDATE compras_detalle SET idcompra = ?, productos = ?, total = ? WHERE iddetalle = ?';
+    db.query(query, [idcompra, JSON.stringify(productos), calcularTotal(productos), iddetalle], callback);
+};
+
+
+const deleteComprasDetalles = (iddetalle, callback) => {
+    const query = 'DELETE FROM compras_detalle WHERE iddetalle = ?';
+    db.query(query, [iddetalle], callback);
+};
+
+
+
+
+// Función para calcular el total de la compra sumando todos los totales de los productos
+const calcularTotal = (productos) => {
+    return productos.reduce((acc, producto) => acc + producto.total_producto, 0);
+};
+
 
 //modelo de compra
 const createCompra = (fecha, iduser, idproducto, cantidad, callback) => {
@@ -1217,6 +1268,571 @@ app.get('/compras/usuario/:id', (req, res) => {
 });
 
 
+app.get('/compra', (req, res) => {
+    const query = `
+        SELECT 
+            c.idcompra, 
+            u.email AS usuario, 
+            c.productos, 
+            c.total, 
+            c.fecha 
+        FROM compras c
+        JOIN users u ON c.iduser = u.iduser
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+
+        // Primero mapeamos las compras para extraer los productos
+        const compras = results.map(compra => {
+            let productosParsed;
+            try {
+                // Parseamos los productos si están almacenados como JSON
+                productosParsed = typeof compra.productos === 'string'
+                    ? JSON.parse(compra.productos)
+                    : compra.productos;
+
+                // Para cada producto, obtenemos su nombre desde la tabla producto
+                const productosConNombre = productosParsed.map(producto => {
+                    return new Promise((resolve, reject) => {
+                        const productQuery = 'SELECT nomprod FROM producto WHERE idproducto = ?';
+                        db.query(productQuery, [producto.idproducto], (err, productResults) => {
+                            if (err) return reject(err);
+
+                            // Reemplazamos idproducto por nomprod
+                            if (productResults.length > 0) {
+                                producto.idproducto = productResults[0].nomprod;
+                            } else {
+                                producto.idproducto = null;
+                            }
+                            resolve(producto);
+                        });
+                    });
+                });
+
+                // Retornamos una promesa que espera a que todos los nombres de productos se obtengan
+                return Promise.all(productosConNombre).then(productos => ({
+                    idcompra: compra.idcompra,
+                    usuario: compra.usuario,  // Ahora es email de la tabla users
+                    productos,  // Productos con idproducto reemplazado por nomprod
+                    total: compra.total,
+                    fecha: compra.fecha
+                }));
+            } catch (error) {
+                return res.status(500).json({ message: 'Error al parsear productos' });
+            }
+        });
+
+        // Ejecutamos todas las promesas y enviamos la respuesta cuando todas se completen
+        Promise.all(compras).then(comprasFinal => {
+            res.json(comprasFinal);
+        }).catch(err => {
+            res.status(500).send(err);
+        });
+    });
+});
+
+
+app.get('/compra/:idcompra', (req, res) => {
+    const { idcompra } = req.params;
+
+    // Consulta para obtener la compra específica
+    const query = 'SELECT c.idcompra, c.iduser, c.productos, c.total, c.fecha FROM compras c WHERE c.idcompra = ?';
+
+    db.query(query, [idcompra], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'Compra no encontrada' });
+        }
+
+        const compra = results[0];
+        let productosParsed;
+
+        try {
+            // Parsear los productos del JSON
+            productosParsed = typeof compra.productos === 'string'
+                ? JSON.parse(compra.productos)
+                : compra.productos;
+
+            // Para cada producto, obtenemos su nombre desde la tabla producto
+            const productosConNombre = productosParsed.map(producto => {
+                return new Promise((resolve, reject) => {
+                    const productQuery = 'SELECT nomprod FROM producto WHERE idproducto = ?';
+                    db.query(productQuery, [producto.idproducto], (err, productResults) => {
+                        if (err) return reject(err);
+
+                        // Reemplazar idproducto por nomprod
+                        if (productResults.length > 0) {
+                            producto.idproducto = productResults[0].nomprod;
+                        } else {
+                            producto.idproducto = null;
+                        }
+                        resolve(producto);
+                    });
+                });
+            });
+
+            // Retornamos una promesa que espera a que todos los nombres de productos se obtengan
+            Promise.all(productosConNombre).then(productos => {
+                res.json({
+                    idcompra: compra.idcompra,
+                    iduser: compra.iduser,
+                    productos,  // Productos con idproducto reemplazado por nomprod
+                    total: compra.total,
+                    fecha: compra.fecha
+                });
+            }).catch(err => {
+                res.status(500).send(err);
+            });
+        } catch (error) {
+            res.status(500).json({ message: 'Error al parsear productos' });
+        }
+    });
+});
+
+// Endpoint para obtener las compras por iduser
+app.get('/compra/usuario/:iduser', (req, res) => {
+    const { iduser } = req.params;
+
+    // Consulta para obtener todas las compras asociadas al iduser
+    const query = 'SELECT c.idcompra, c.iduser, c.productos, c.total, c.fecha FROM compras c WHERE c.iduser = ?';
+
+    db.query(query, [iduser], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'No se encontraron compras para el usuario' });
+        }
+
+        // Procesar cada compra para reemplazar los IDs de productos con sus nombres
+        const comprasConProductos = results.map(compra => {
+            let productosParsed;
+
+            try {
+                // Parsear los productos del JSON
+                productosParsed = typeof compra.productos === 'string'
+                    ? JSON.parse(compra.productos)
+                    : compra.productos;
+
+                // Para cada producto, obtenemos su nombre desde la tabla producto
+                const productosConNombre = productosParsed.map(producto => {
+                    return new Promise((resolve, reject) => {
+                        const productQuery = 'SELECT nomprod FROM producto WHERE idproducto = ?';
+                        db.query(productQuery, [producto.idproducto], (err, productResults) => {
+                            if (err) return reject(err);
+
+                            // Reemplazar idproducto por nomprod
+                            if (productResults.length > 0) {
+                                producto.idproducto = productResults[0].nomprod;
+                            } else {
+                                producto.idproducto = null;
+                            }
+                            resolve(producto);
+                        });
+                    });
+                });
+
+                // Retornamos una promesa que espera a que todos los nombres de productos se obtengan
+                return Promise.all(productosConNombre).then(productos => {
+                    return {
+                        idcompra: compra.idcompra,
+                        iduser: compra.iduser,
+                        productos,  // Productos con idproducto reemplazado por nomprod
+                        total: compra.total,
+                        fecha: compra.fecha
+                    };
+                }).catch(err => {
+                    throw err;
+                });
+            } catch (error) {
+                throw new Error('Error al parsear productos');
+            }
+        });
+
+        // Retornar todas las compras una vez que se han procesado
+        Promise.all(comprasConProductos).then(compras => {
+            res.json(compras);
+        }).catch(err => {
+            res.status(500).send(err);
+        });
+    });
+});
+
+
+
+
+app.post('/nueva-compras', (req, res) => {
+    const { fecha, iduser, productos } = req.body;
+
+    console.log('Datos recibidos en la solicitud:', req.body); // Verificar los datos recibidos
+
+    // Verificar que el usuario exista
+    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(userQuery, [iduser], (userErr, userResults) => {
+        if (userErr) {
+            console.error('Error al consultar el usuario:', userErr);
+            return res.status(500).send(userErr);
+        }
+        if (userResults.length === 0) {
+            console.log('Usuario no encontrado:', iduser);
+            return res.status(404).json({ message: 'Usuario no encontrado' });
+        }
+
+        // Procesar los productos para obtener precios y totales
+        const productosProcesados = [];
+        productos.forEach((producto, index) => {
+            const productQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
+            db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
+                if (productErr) {
+                    console.error('Error al consultar el producto:', productErr);
+                    return res.status(500).send(productErr);
+                }
+                if (productResults.length === 0) {
+                    console.log('Producto no encontrado:', producto.idproducto);
+                    return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
+                }
+
+                const p_final = productResults[0].p_final;
+                const total_producto = p_final * producto.cantidad;
+
+                productosProcesados.push({
+                    idproducto: producto.idproducto,
+                    cantidad: producto.cantidad,
+                    total_producto: total_producto
+                });
+
+                console.log('Producto procesado:', productosProcesados[productosProcesados.length - 1]); // Verificar producto procesado
+
+                // Si ya se procesaron todos los productos, crear la compra
+                if (index === productos.length - 1) {
+                    console.log('Productos procesados antes de crear la compra:', productosProcesados); // Verificar productos procesados
+
+                    createCompras(fecha, iduser, productosProcesados, (compraErr, compraResults) => {
+                        if (compraErr) {
+                            console.error('Error al crear la compra:', compraErr);
+                            return res.status(500).send(compraErr);
+                        }
+
+                        const idcompra = compraResults.insertId;  // Obtener el id de la compra creada
+
+                        console.log('Compra creada con ID:', idcompra); // Verificar ID de la compra
+
+                        // Llamar al modelo createComprasDetalles para crear los detalles de la compra
+                        createComprasDetalles(idcompra, productosProcesados, (detalleErr) => {
+                            if (detalleErr) {
+                                console.error('Error al crear los detalles de la compra:', detalleErr);
+                                return res.status(500).send(detalleErr);
+                            }
+                            console.log('Detalles de la compra creados exitosamente');
+                            res.status(201).json({ message: 'Compra y detalles creados exitosamente' });
+                        });
+                    });
+                }
+            });
+        });
+    });
+});
+
+
+// Endpoint PUT para actualizar una compra
+app.put('/actualizar-compras/:idcompra', (req, res) => {
+    const { fecha, iduser, productos } = req.body;
+    const idcompra = req.params.idcompra;
+
+    // Verificar que el usuario exista
+    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(userQuery, [iduser], (userErr, userResults) => {
+        if (userErr) {
+            return res.status(500).send(userErr);
+        }
+        if (userResults.length === 0) {
+            return res.status(404).json({ message: 'Usuario no encontrado' });
+        }
+
+        // Obtener los detalles de los productos
+        const productosProcesados = [];
+        productos.forEach((producto, index) => {
+            const productQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';  // No necesitamos nomprod
+            db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
+                if (productErr) {
+                    return res.status(500).send(productErr);
+                }
+                if (productResults.length === 0) {
+                    return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
+                }
+
+                // Calcular el total por producto
+                const p_final = productResults[0].p_final;
+                const total_producto = p_final * producto.cantidad;
+
+                // Añadir el producto procesado al arreglo
+                productosProcesados.push({
+                    idproducto: producto.idproducto,  // Solo mantenemos idproducto
+                    cantidad: producto.cantidad,
+                    total_producto: total_producto
+                });
+
+                // Si ya hemos procesado todos los productos, actualizar la compra
+                if (index === productos.length - 1) {
+                    updateCompras(idcompra, fecha, iduser, productosProcesados, (updateErr) => {
+                        if (updateErr) {
+                            return res.status(500).send(updateErr);
+                        }
+                        res.status(200).json({ message: 'Compra actualizada exitosamente' });
+                    });
+                }
+            });
+        });
+    });
+});
+
+
+
+// Endpoint DELETE para eliminar una compra
+app.delete('/eliminar-compras/:idcompra', (req, res) => {
+    const { idcompra } = req.params;
+
+    deleteCompras(idcompra, (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.affectedRows === 0) {
+            res.status(404).json({ message: 'Compra no encontrada' });
+            return;
+        }
+        res.status(200).json({ message: 'Compra eliminada exitosamente' });
+    });
+});
+
+
+//endpoint de compras detalle con formato JSON
+
+app.get('/compra-detalle', (req, res) => {
+    const query = 'SELECT cd.iddetalle, cd.idcompra, cd.productos, cd.total FROM compras_detalle cd';
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+
+        // Primero mapeamos los detalles para extraer los productos
+        const detalles = results.map(detalle => {
+            let productosParsed;
+            try {
+                // Parseamos los productos si están almacenados como JSON
+                productosParsed = typeof detalle.productos === 'string'
+                    ? JSON.parse(detalle.productos)
+                    : detalle.productos;
+
+                // Para cada producto, obtenemos su nombre desde la tabla producto
+                const productosConNombre = productosParsed.map(producto => {
+                    return new Promise((resolve, reject) => {
+                        const productQuery = 'SELECT nomprod FROM producto WHERE idproducto = ?';
+                        db.query(productQuery, [producto.idproducto], (err, productResults) => {
+                            if (err) return reject(err);
+
+                            // Reemplazamos idproducto por nomprod
+                            if (productResults.length > 0) {
+                                producto.idproducto = productResults[0].nomprod;
+                            } else {
+                                producto.idproducto = null;
+                            }
+                            resolve(producto);
+                        });
+                    });
+                });
+
+                // Retornamos una promesa que espera a que todos los nombres de productos se obtengan
+                return Promise.all(productosConNombre).then(productos => ({
+                    iddetalle: detalle.iddetalle,
+                    idcompra: detalle.idcompra,
+                    productos,  // Productos con idproducto reemplazado por nomprod
+                    total: detalle.total
+                }));
+            } catch (error) {
+                return res.status(500).json({ message: 'Error al parsear productos' });
+            }
+        });
+
+        // Ejecutamos todas las promesas y enviamos la respuesta cuando todas se completen
+        Promise.all(detalles).then(detallesFinal => {
+            res.json(detallesFinal);
+        }).catch(err => {
+            res.status(500).send(err);
+        });
+    });
+});
+
+app.get('/compra-detalle/:idcompra', (req, res) => {
+    const { idcompra } = req.params;
+
+    // Consulta para obtener los detalles de una compra específica
+    const query = 'SELECT cd.iddetalle, cd.idcompra, cd.productos, cd.total FROM compras_detalle cd WHERE cd.idcompra = ?';
+    
+    db.query(query, [idcompra], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'Detalles de compra no encontrados' });
+        }
+
+        // Procesar los detalles para extraer los productos
+        const detalles = results.map(detalle => {
+            let productosParsed;
+            try {
+                // Parsear los productos del JSON
+                productosParsed = typeof detalle.productos === 'string'
+                    ? JSON.parse(detalle.productos)
+                    : detalle.productos;
+
+                // Obtener los nombres de los productos
+                const productosConNombre = productosParsed.map(producto => {
+                    return new Promise((resolve, reject) => {
+                        const productQuery = 'SELECT nomprod FROM producto WHERE idproducto = ?';
+                        db.query(productQuery, [producto.idproducto], (err, productResults) => {
+                            if (err) return reject(err);
+
+                            // Reemplazar idproducto por nomprod
+                            if (productResults.length > 0) {
+                                producto.idproducto = productResults[0].nomprod;
+                            } else {
+                                producto.idproducto = null;
+                            }
+                            resolve(producto);
+                        });
+                    });
+                });
+
+                // Retornar una promesa que espera a que todos los nombres de productos se obtengan
+                return Promise.all(productosConNombre).then(productos => ({
+                    iddetalle: detalle.iddetalle,
+                    idcompra: detalle.idcompra,
+                    productos,  // Productos con idproducto reemplazado por nomprod
+                    total: detalle.total
+                }));
+            } catch (error) {
+                return res.status(500).json({ message: 'Error al parsear productos' });
+            }
+        });
+
+        // Ejecutar todas las promesas y enviar la respuesta cuando todas se completen
+        Promise.all(detalles).then(detallesFinal => {
+            res.json(detallesFinal);
+        }).catch(err => {
+            res.status(500).send(err);
+        });
+    });
+});
+
+
+app.post('/nueva-compras-detalles', (req, res) => {
+    const { idcompra, productos } = req.body;
+
+    // Procesar los productos
+    const productosProcesados = [];
+    productos.forEach((producto, index) => {
+        const productQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
+        db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
+            if (productErr) {
+                return res.status(500).send(productErr);
+            }
+            if (productResults.length === 0) {
+                return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
+            }
+
+            const p_final = productResults[0].p_final;
+            const total_producto = p_final * producto.cantidad;
+
+            // Agregar producto procesado con cantidad
+            productosProcesados.push({
+                idproducto: producto.idproducto,
+                cantidad: producto.cantidad,
+                total_producto: total_producto
+            });
+
+            // Verificar si todos los productos han sido procesados
+            if (index === productos.length - 1) {
+                // Crear los detalles de la compra
+                createComprasDetalles(idcompra, productosProcesados, (detalleErr) => {
+                    if (detalleErr) {
+                        return res.status(500).send(detalleErr);
+                    }
+                    res.status(201).json({ message: 'Detalles de compra creados exitosamente' });
+                });
+            }
+        });
+    });
+});
+
+
+app.put('/actualizar-compras-detalles/:iddetalle', (req, res) => {
+    const { idcompra, productos } = req.body;
+    const iddetalle = req.params.iddetalle;
+
+    // Obtener los detalles de los productos
+    const productosProcesados = [];
+    productos.forEach((producto, index) => {
+        const productQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
+        db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
+            if (productErr) {
+                return res.status(500).send(productErr);
+            }
+            if (productResults.length === 0) {
+                return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
+            }
+
+            // Calcular el total por producto
+            const p_final = productResults[0].p_final;
+            const total_producto = p_final * producto.cantidad;
+
+            // Añadir el producto procesado al arreglo
+            productosProcesados.push({
+                idproducto: producto.idproducto,
+                cantidad: producto.cantidad,
+                total_producto: total_producto
+            });
+
+            // Si ya hemos procesado todos los productos, actualizar el detalle de compra
+            if (index === productos.length - 1) {
+                updateComprasDetalles(iddetalle, idcompra, productosProcesados, (updateErr) => {
+                    if (updateErr) {
+                        return res.status(500).send(updateErr);
+                    }
+                    res.status(200).json({ message: 'Detalle de compra actualizado exitosamente' });
+                });
+            }
+        });
+    });
+});
+
+
+
+app.delete('/eliminar-compras-detalles/:iddetalle', (req, res) => {
+    const { iddetalle } = req.params;
+
+    deleteComprasDetalles(iddetalle, (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.affectedRows === 0) {
+            return res.status(404).json({ message: 'Detalle de compra no encontrado' });
+        }
+        res.status(200).json({ message: 'Detalle de compra eliminado exitosamente' });
+    });
+});
+
+
+//aqui empieza el formato habitual que teniamos de compras
+
 // Endpoint POST para agregar una compra
 app.post('/nueva-compra-producto', (req, res) => {
     const { fecha, iduser, idproducto, cantidad } = req.body;
@@ -1806,6 +2422,22 @@ app.delete('/eliminar-cupon/:idcupon', (req, res) => {
     });
 });
 
+
+// Endpoint POST para validar cupón
+app.post('/validar-cupon', (req, res) => {
+    const { codigo } = req.body;
+    const query = 'SELECT * FROM cupones WHERE codigo = ? AND activo = 1 AND usos_maximos > 0 AND fecha_expiracion >= NOW()';
+
+    db.query(query, [codigo], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'Cupón no válido o expirado' });
+        }
+        res.status(200).json(results[0]);
+    });
+});
 // Endpoint GET para obtener un cupón por ID
 app.get('/cupones/:idcupon', (req, res) => {
     const { idcupon } = req.params;
