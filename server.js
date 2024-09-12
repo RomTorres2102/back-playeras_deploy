@@ -1469,24 +1469,14 @@ app.get('/compra/usuario/:iduser', (req, res) => {
 
 
 app.post('/nueva-compras', (req, res) => {
-    const { fecha, iduser, productos } = req.body;
+    const { fecha, iduser, productos, codigoCupon } = req.body; // Recibe el código de cupón, si existe.
 
-    console.log('Datos recibidos en la solicitud:', req.body); // Verificar los datos recibidos
+    console.log('Datos recibidos en la solicitud:', req.body);
 
-    // Verificar que el usuario exista
-    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
-    db.query(userQuery, [iduser], (userErr, userResults) => {
-        if (userErr) {
-            console.error('Error al consultar el usuario:', userErr);
-            return res.status(500).send(userErr);
-        }
-        if (userResults.length === 0) {
-            console.log('Usuario no encontrado:', iduser);
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-
-        // Procesar los productos para obtener precios y totales
+    // Función para procesar productos con o sin descuento
+    const procesarProductosConDescuento = (descuento) => {
         const productosProcesados = [];
+
         productos.forEach((producto, index) => {
             const productQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
             db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
@@ -1500,7 +1490,12 @@ app.post('/nueva-compras', (req, res) => {
                 }
 
                 const p_final = productResults[0].p_final;
-                const total_producto = p_final * producto.cantidad;
+                let total_producto = p_final * producto.cantidad;
+
+                // Aplicar el descuento si es mayor a 0
+                if (descuento > 0) {
+                    total_producto = total_producto - (total_producto * (descuento / 100));
+                }
 
                 productosProcesados.push({
                     idproducto: producto.idproducto,
@@ -1508,11 +1503,11 @@ app.post('/nueva-compras', (req, res) => {
                     total_producto: total_producto
                 });
 
-                console.log('Producto procesado:', productosProcesados[productosProcesados.length - 1]); // Verificar producto procesado
+                console.log('Producto procesado:', productosProcesados[productosProcesados.length - 1]);
 
                 // Si ya se procesaron todos los productos, crear la compra
                 if (index === productos.length - 1) {
-                    console.log('Productos procesados antes de crear la compra:', productosProcesados); // Verificar productos procesados
+                    console.log('Productos procesados antes de crear la compra:', productosProcesados);
 
                     createCompras(fecha, iduser, productosProcesados, (compraErr, compraResults) => {
                         if (compraErr) {
@@ -1521,10 +1516,9 @@ app.post('/nueva-compras', (req, res) => {
                         }
 
                         const idcompra = compraResults.insertId;  // Obtener el id de la compra creada
+                        console.log('Compra creada con ID:', idcompra);
 
-                        console.log('Compra creada con ID:', idcompra); // Verificar ID de la compra
-
-                        // Llamar al modelo createComprasDetalles para crear los detalles de la compra
+                        // Crear los detalles de la compra
                         createComprasDetalles(idcompra, productosProcesados, (detalleErr) => {
                             if (detalleErr) {
                                 console.error('Error al crear los detalles de la compra:', detalleErr);
@@ -1537,8 +1531,42 @@ app.post('/nueva-compras', (req, res) => {
                 }
             });
         });
+    };
+
+    // Verificar que el usuario exista
+    const userQuery = 'SELECT * FROM users WHERE iduser = ?';
+    db.query(userQuery, [iduser], (userErr, userResults) => {
+        if (userErr) {
+            console.error('Error al consultar el usuario:', userErr);
+            return res.status(500).send(userErr);
+        }
+        if (userResults.length === 0) {
+            console.log('Usuario no encontrado:', iduser);
+            return res.status(404).json({ message: 'Usuario no encontrado' });
+        }
+
+        // Validar el cupón si se proporciona uno
+        if (codigoCupon) {
+            const cuponQuery = 'SELECT * FROM cupones WHERE codigo = ? AND activo = 1 AND usos_maximos > 0 AND fecha_expiracion >= NOW()';
+            db.query(cuponQuery, [codigoCupon], (cuponErr, cuponResults) => {
+                if (cuponErr) {
+                    console.error('Error al validar el cupón:', cuponErr);
+                    return res.status(500).send(cuponErr);
+                }
+                if (cuponResults.length === 0) {
+                    return res.status(404).json({ message: 'Cupón no válido o expirado' });
+                }
+
+                const descuento = cuponResults[0].porcentaje; // Obtener el porcentaje de descuento
+                procesarProductosConDescuento(descuento);
+            });
+        } else {
+            // Si no hay cupón, procesar los productos sin descuento
+            procesarProductosConDescuento(0);
+        }
     });
 });
+
 
 
 // Endpoint PUT para actualizar una compra
