@@ -198,7 +198,7 @@ const deleteEmail = async (idemail, callback) => {
   }
 };
 // Funciones de modelo de Productos
-const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, callback) => {
+const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento,  callback) => {
   try {
     // Calculamos p_final basado en el descuento
     const p_final = p_producto - (p_producto * (descuento / 100));
@@ -210,12 +210,12 @@ const createProducto = async (p_producto, nomprod, clave, descripcion, foto, fot
   }
 };
 
-const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, callback) => {
+const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento,  callback) => {
   try {
     // Calculamos p_final basado en el descuento
     const p_final = p_producto - (p_producto * (descuento / 100));
 
-    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ?, descuento = ?, p_final = ? WHERE idproducto = ?';
+    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ?, descuento = ?,  p_final = ? WHERE idproducto = ?';
     db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final, idproducto], callback);
   } catch (err) {
     callback(err, null);
@@ -464,36 +464,6 @@ const deleteCompraDetalle = (iddetalle, callback) => {
     db.query(query, [iddetalle], callback);
 };
 
-// Ruta para agregar un comentario
-app.post('/comentarios', (req, res) => {
-    const { idproducto, iduser, comentario } = req.body;
-
-    // Consulta para verificar si el usuario ya ha comentado sobre el producto
-    const checkQuery = 'SELECT * FROM comentarios WHERE idproducto = ? AND iduser = ?';
-    db.query(checkQuery, [idproducto, iduser], (checkErr, checkResults) => {
-        if (checkErr) {
-            console.error('Error al verificar los comentarios existentes:', checkErr);
-            res.status(500).json({ error: 'Error al verificar los comentarios existentes' });
-            return;
-        }
-
-        if (checkResults.length > 0) {
-            // El usuario ya ha comentado sobre este producto
-            res.status(400).json({ error: 'Solo puedes comentar una vez por producto' });
-        } else {
-            // El usuario no ha comentado sobre este producto, proceder a agregar el comentario
-            const query = 'INSERT INTO comentarios (idproducto, iduser, comentario) VALUES (?, ?, ?)';
-            db.query(query, [idproducto, iduser, comentario], (err, results) => {
-                if (err) {
-                    console.error('Error al agregar el comentario:', err);
-                    res.status(500).json({ error: 'Error al agregar el comentario' });
-                    return;
-                }
-                res.status(201).json({ message: 'Comentario agregado correctamente' });
-            });
-        }
-    });
-});
 
 // Crear una nueva entrada en el carrusel
 const createSlide = (foto, callback) => {
@@ -717,12 +687,12 @@ app.delete('/eliminar-carrusel/:idfoto', (req, res) => {
     });
 });
 
-// Ruta para obtener comentarios de un producto
+// Ruta para obtener comentarios de un producto con calificación
 app.get('/comentarios/:idproducto', (req, res) => {
     const { idproducto } = req.params;
 
     const query = `
-        SELECT c.comentario, c.fecha, u.user as user, u.foto as userFoto 
+        SELECT c.comentario, c.fecha, c.calificacion, u.user as user, u.foto as userFoto 
         FROM comentarios c 
         JOIN users u ON c.iduser = u.iduser 
         WHERE c.idproducto = ? 
@@ -737,6 +707,91 @@ app.get('/comentarios/:idproducto', (req, res) => {
         res.status(200).json(results);
     });
 });
+
+// Ruta para obtener el resumen de calificaciones por producto
+app.get('/calificaciones-resumen/:idproducto', (req, res) => {
+    const { idproducto } = req.params;
+
+    const query = `
+        SELECT
+          idproducto,
+          SUM(CASE WHEN calificacion = 1 THEN 1 ELSE 0 END) AS '1',
+          SUM(CASE WHEN calificacion = 2 THEN 1 ELSE 0 END) AS '2',
+          SUM(CASE WHEN calificacion = 3 THEN 1 ELSE 0 END) AS '3',
+          SUM(CASE WHEN calificacion = 4 THEN 1 ELSE 0 END) AS '4',
+          SUM(CASE WHEN calificacion = 5 THEN 1 ELSE 0 END) AS '5',
+          COUNT(*) AS 'TOTAL',
+          ROUND(
+            (
+              (SUM(CASE WHEN calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+               SUM(CASE WHEN calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+               SUM(CASE WHEN calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+               SUM(CASE WHEN calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+               SUM(CASE WHEN calificacion = 5 THEN 1 ELSE 0 END) * 5
+              ) / COUNT(*)
+            ), 2
+          ) AS calificacion_final
+        FROM
+          comentarios
+        WHERE
+          idproducto = ?
+        GROUP BY
+          idproducto
+    `;
+
+    db.query(query, [idproducto], (err, results) => {
+        if (err) {
+            console.error('Error al obtener el resumen de calificaciones:', err);
+            res.status(500).json({ error: 'Error al obtener el resumen de calificaciones' });
+            return;
+        }
+
+        if (results.length === 0) {
+            res.status(404).json({ message: 'No se encontraron calificaciones para este producto' });
+            return;
+        }
+
+        res.status(200).json(results[0]);
+    });
+});
+
+
+
+
+// Ruta para agregar un comentario
+app.post('/comentarios', (req, res) => {
+    const { idproducto, iduser, comentario, calificacion } = req.body;
+
+    // Validar que la calificación esté en el rango permitido
+    if (calificacion < 1 || calificacion > 5) {
+        return res.status(400).json({ error: 'La calificación debe estar entre 1 y 5' });
+    }
+
+    // Consulta para verificar si el usuario ya ha comentado sobre el producto
+    const checkQuery = 'SELECT * FROM comentarios WHERE idproducto = ? AND iduser = ?';
+    db.query(checkQuery, [idproducto, iduser], (checkErr, checkResults) => {
+        if (checkErr) {
+            console.error('Error al verificar los comentarios existentes:', checkErr);
+            res.status(500).json({ error: 'Error al verificar los comentarios existentes' });
+            return;
+        }
+
+        if (checkResults.length > 0) {
+            res.status(400).json({ error: 'Solo puedes comentar una vez por producto' });
+        } else {
+            const query = 'INSERT INTO comentarios (idproducto, iduser, comentario, calificacion) VALUES (?, ?, ?, ?)';
+            db.query(query, [idproducto, iduser, comentario, calificacion], (err, results) => {
+                if (err) {
+                    console.error('Error al agregar el comentario:', err);
+                    res.status(500).json({ error: 'Error al agregar el comentario' });
+                    return;
+                }
+                res.status(201).json({ message: 'Comentario y calificación agregados correctamente' });
+            });
+        }
+    });
+});
+
 // Endpoint GET para obtener todos los usuarios
 app.get('/usuarios', (req, res) => {
     const query = 'SELECT * FROM users';
@@ -927,8 +982,27 @@ app.get('/contar-productos-con-descuento', (req, res) => {
 
 
 // Endpoint GET para obtener todos los productos
+
 app.get('/productos', (req, res) => {
-  const query = 'SELECT * FROM producto';
+  const query = `
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    GROUP BY 
+      producto.idproducto
+  `;
+
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send(err);
@@ -937,6 +1011,7 @@ app.get('/productos', (req, res) => {
     res.status(200).json(results);
   });
 });
+
 
 // Endpoint para obtener los primeros 4 registros más recientes
 app.get('/productos-recientes', (req, res) => {
@@ -952,7 +1027,27 @@ app.get('/productos-recientes', (req, res) => {
 
 //Endpoint para obtener los productos con descuentos
 app.get('/productos-con-descuento', (req, res) => {
-  const query = 'SELECT * FROM producto WHERE descuento > 0';
+  const query = `
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    WHERE 
+      producto.descuento > 0
+    GROUP BY 
+      producto.idproducto
+  `;
+
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send(err);
@@ -963,10 +1058,32 @@ app.get('/productos-con-descuento', (req, res) => {
 });
 
 
+
 // Endpoint para obtener un producto por ID
 app.get('/productos/:id', (req, res) => {
   const { id } = req.params;
-  const query = 'SELECT * FROM producto WHERE idproducto = ?';
+  
+  const query = `
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    WHERE 
+      producto.idproducto = ?
+    GROUP BY 
+      producto.idproducto
+  `;
+
   db.query(query, [id], (err, results) => {
     if (err) {
       res.status(500).send(err);
@@ -982,12 +1099,12 @@ app.get('/productos/:id', (req, res) => {
 
 // Endpoint POST para agregar producto
 app.post('/nuevo-producto', async (req, res) => {
-  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento } = req.body;
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento  } = req.body;
 
   // Validar si se ha enviado un descuento, de lo contrario poner 0
   const descuentoAplicado = descuento || 0;
 
-  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado, (err, results) => {
+  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado,  (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -999,12 +1116,12 @@ app.post('/nuevo-producto', async (req, res) => {
 // Endpoint PUT para actualizar un producto
 app.put('/actualizar-producto/:idproducto', async (req, res) => {
   const { idproducto } = req.params;
-  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento } = req.body;
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento  } = req.body;
 
   // Validar si se ha enviado un descuento, de lo contrario poner 0
   const descuentoAplicado = descuento || 0;
 
-  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado, (err, results) => {
+  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado,  (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -2481,6 +2598,9 @@ app.get('/cupones/:idcupon', (req, res) => {
         res.status(200).json(results[0]);
     });
 });
+
+
+
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
