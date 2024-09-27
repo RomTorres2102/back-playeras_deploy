@@ -4,16 +4,16 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';  
-import multer from 'multer'; 
-import Stripe from 'stripe';
+import multer from 'multer';
+import paypal from '@paypal/checkout-server-sdk';
 import path from 'path'; 
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
 
+
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const __dirname = dirname(__filename);
 const app = express();
 app.use(cors());
@@ -74,6 +74,13 @@ db.connect(err => {
     }
     console.log('Conectado a la base de datos');
 });
+
+const environment = new paypal.core.SandboxEnvironment(
+  process.env.PAYPAL_CLIENT_ID, 
+  process.env.PAYPAL_CLIENT_SECRET
+);
+const client = new paypal.core.PayPalHttpClient(environment);
+
 
 
 // Función para crear un cupón
@@ -257,9 +264,9 @@ const deleteCompras = (idcompra, callback) => {
 //modelo compras detalle con JSON
 
 // Función para insertar los detalles de compra en la base de datos
-const createComprasDetalles = (idcompra, productos, callback) => {
-    const query = 'INSERT INTO compras_detalle (idcompra, productos, total) VALUES (?, ?, ?)';
-    db.query(query, [idcompra, JSON.stringify(productos), calcularTotal(productos)], callback);
+const createComprasDetalles = (idcompra, productos, codigoCupon, callback) => {
+    const query = 'INSERT INTO compras_detalle (idcompra, productos, total, codigoCupon) VALUES (?, ?, ?, ?)';
+    db.query(query, [idcompra, JSON.stringify(productos), calcularTotal(productos), codigoCupon], callback);
 };
 
 
@@ -482,6 +489,86 @@ const deleteSlide = (idfoto, callback) => {
     const query = 'DELETE FROM carrusel WHERE idfoto = ?';
     db.query(query, [idfoto], callback);
 };
+
+// Endpoint para capturar la orden una vez que el cliente paga en PayPal
+app.post('/capture-order', async (req, res) => {
+    const { orderID, iduser } = req.body; // Asegúrate de pasar el iduser
+
+    const request = new paypal.orders.OrdersCaptureRequest(orderID);
+    request.requestBody({});
+
+    try {
+        const capture = await client.execute(request);
+
+        // Extraer la información relevante de la captura
+        const status = capture.result.status;
+        const total = capture.result.purchase_units[0].amount.value;
+        const currency = capture.result.purchase_units[0].amount.currency_code;
+        const description = capture.result.purchase_units[0].description;
+
+        // Guardar los logs en la base de datos
+        const logQuery = `
+            INSERT INTO paypal_logs (order_id, status, iduser, total, currency, description, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
+        const details = JSON.stringify(capture.result); // Guardar todos los detalles en formato JSON
+        db.query(logQuery, [orderID, status, iduser, total, currency, description, details], (logErr, logResult) => {
+            if (logErr) {
+                console.error('Error al guardar el log de PayPal:', logErr);
+                return res.status(500).json({ message: 'Error interno al guardar el log de PayPal' });
+            }
+
+            res.json({ status: capture.result.status, details: capture.result }); // Enviar los detalles de la captura
+        });
+    } catch (err) {
+        console.error('Error al capturar la orden:', err);
+        res.status(500).send('Error al capturar la orden de PayPal');
+    }
+});
+
+// Endpoint para crear una orden de PayPal
+app.post('/create-order', async (req, res) => {
+    const { total, currency, description, iduser } = req.body;
+
+    const request = new paypal.orders.OrdersCreateRequest();
+    request.prefer("return=representation");
+    request.requestBody({
+        intent: 'CAPTURE',
+        purchase_units: [{
+            amount: {
+                currency_code: currency || 'USD',
+                value: total
+            },
+            description: description || 'Compra en Mi Sitio Web'
+        }],
+        application_context: {
+            return_url: "http://localhost:5173/carrito",
+            cancel_url: "http://localhost:5173/perfil"
+        }
+    });
+
+    try {
+        const order = await client.execute(request);
+
+        // Guardar los logs de la orden creada
+        const logQuery = `
+            INSERT INTO paypal_logs (order_id, status, iduser, total, currency, description, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
+        const details = JSON.stringify(order.result); // Guardar todos los detalles en formato JSON
+        db.query(logQuery, [order.result.id, 'CREATED', iduser, total, currency, description, details], (logErr, logResult) => {
+            if (logErr) {
+                console.error('Error al guardar el log de PayPal:', logErr);
+                return res.status(500).json({ message: 'Error interno al guardar el log de PayPal' });
+            }
+
+            res.json({ id: order.result.id, links: order.result.links });
+        });
+    } catch (err) {
+        console.error('Error al crear la orden:', err);
+        res.status(500).send('Error al crear la orden de PayPal');
+    }
+});
 
 // Endpoint GET para obtener todas las fotos del carrusel
 app.get('/carrusel', (req, res) => {
@@ -1200,7 +1287,7 @@ app.get('/clave-producto/:clave', (req, res) => {
   const query = 'SELECT * FROM producto WHERE clave = ?';
   db.query(query, [clave], (err, results) => {
     if (err) {
-      res.status(500).send(err);
+      res.status(500).send(err);    
       return;
     }
     res.status(200).json(results);
@@ -1586,11 +1673,10 @@ app.get('/compra/usuario/:iduser', (req, res) => {
 
 
 app.post('/nueva-compras', (req, res) => {
-    const { fecha, iduser, productos, codigoCupon } = req.body; // Recibe el código de cupón, si existe.
+    const { fecha, iduser, productos, codigoCupon } = req.body; // Recibe también la talla en productos
 
     console.log('Datos recibidos en la solicitud:', req.body);
 
-    // Función para procesar productos con o sin descuento
     const procesarProductosConDescuento = (descuento) => {
         const productosProcesados = [];
 
@@ -1599,53 +1685,44 @@ app.post('/nueva-compras', (req, res) => {
             db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
                 if (productErr) {
                     console.error('Error al consultar el producto:', productErr);
-                    return res.status(500).send(productErr);
+                    return res.status(500).json({ message: 'Error interno del servidor' });
                 }
                 if (productResults.length === 0) {
-                    console.log('Producto no encontrado:', producto.idproducto);
                     return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
                 }
 
                 const p_final = productResults[0].p_final;
                 let total_producto = p_final * producto.cantidad;
 
-                // Aplicar el descuento si es mayor a 0
                 if (descuento > 0) {
-                    total_producto = total_producto - (total_producto * (descuento / 100));
+                    total_producto -= total_producto * (descuento / 100);
                 }
 
                 productosProcesados.push({
                     idproducto: producto.idproducto,
                     cantidad: producto.cantidad,
+                    talla: producto.talla, // Guardar la talla
                     total_producto: total_producto
                 });
 
-                console.log('Producto procesado:', productosProcesados[productosProcesados.length - 1]);
-
-                // Si ya se procesaron todos los productos, crear la compra
                 if (index === productos.length - 1) {
-                    console.log('Productos procesados antes de crear la compra:', productosProcesados);
+    createCompras(fecha, iduser, productosProcesados, (compraErr, compraResults) => {
+        if (compraErr) {
+            console.error('Error al crear la compra:', compraErr);
+            return res.status(500).json({ message: 'Error interno del servidor' });
+        }
 
-                    createCompras(fecha, iduser, productosProcesados, (compraErr, compraResults) => {
-                        if (compraErr) {
-                            console.error('Error al crear la compra:', compraErr);
-                            return res.status(500).send(compraErr);
-                        }
-
-                        const idcompra = compraResults.insertId;  // Obtener el id de la compra creada
-                        console.log('Compra creada con ID:', idcompra);
-
-                        // Crear los detalles de la compra
-                        createComprasDetalles(idcompra, productosProcesados, (detalleErr) => {
-                            if (detalleErr) {
-                                console.error('Error al crear los detalles de la compra:', detalleErr);
-                                return res.status(500).send(detalleErr);
-                            }
-                            console.log('Detalles de la compra creados exitosamente');
-                            res.status(201).json({ message: 'Compra y detalles creados exitosamente' });
-                        });
-                    });
-                }
+        const idcompra = compraResults.insertId;
+        // Pasar el codigoCupon al crear los detalles de la compra
+        createComprasDetalles(idcompra, productosProcesados, codigoCupon, (detalleErr) => {
+            if (detalleErr) {
+                console.error('Error al crear los detalles de la compra:', detalleErr);
+                return res.status(500).json({ message: 'Error interno del servidor' });
+            }
+            res.status(201).json({ message: 'Compra y detalles creados exitosamente' });
+        });
+    });
+}
             });
         });
     };
@@ -1721,7 +1798,9 @@ app.put('/actualizar-compras/:idcompra', (req, res) => {
                 productosProcesados.push({
                     idproducto: producto.idproducto,  // Solo mantenemos idproducto
                     cantidad: producto.cantidad,
+                    talla: producto.talla, 
                     total_producto: total_producto
+
                 });
 
                 // Si ya hemos procesado todos los productos, actualizar la compra
@@ -1755,6 +1834,42 @@ app.delete('/eliminar-compras/:idcompra', (req, res) => {
         }
         res.status(200).json({ message: 'Compra eliminada exitosamente' });
     });
+});
+
+// Crear pago
+app.post('/create-payment', async (req, res) => {
+  const request = new paypal.orders.OrdersCreateRequest();
+  request.prefer("return=representation");
+  request.requestBody({
+    intent: 'CAPTURE',
+    purchase_units: [{
+      amount: {
+        currency_code: 'USD',
+        value: '100.00' // Cambia este valor según lo que quieras cobrar
+      }
+    }]
+  });
+
+  try {
+    const order = await client.execute(request);
+    res.json({ id: order.result.id }); // Devuelve el ID del pedido para usar en la captura
+  } catch (err) {
+    res.status(500).send(err);
+  }
+});
+
+// Capturar el pago
+app.post('/capture-payment', async (req, res) => {
+  const orderID = req.body.orderID;
+  const request = new paypal.orders.OrdersCaptureRequest(orderID);
+  request.requestBody({});
+
+  try {
+    const capture = await client.execute(request);
+    res.json({ status: capture.result.status });
+  } catch (err) {
+    res.status(500).send(err);
+  }
 });
 
 
@@ -1820,7 +1935,7 @@ app.get('/compra-detalle/:idcompra', (req, res) => {
     const { idcompra } = req.params;
 
     // Consulta para obtener los detalles de una compra específica
-    const query = 'SELECT cd.iddetalle, cd.idcompra, cd.productos, cd.total FROM compras_detalle cd WHERE cd.idcompra = ?';
+    const query = 'SELECT cd.iddetalle, cd.idcompra,  cd.productos, cd.total , cd.codigoCupon FROM compras_detalle cd WHERE cd.idcompra = ?';
     
     db.query(query, [idcompra], (err, results) => {
         if (err) {
@@ -1862,7 +1977,8 @@ app.get('/compra-detalle/:idcompra', (req, res) => {
                     iddetalle: detalle.iddetalle,
                     idcompra: detalle.idcompra,
                     productos,  // Productos con idproducto reemplazado por nomprod
-                    total: detalle.total
+                    total: detalle.total,
+                    codigoCupon : detalle.codigoCupon
                 }));
             } catch (error) {
                 return res.status(500).json({ message: 'Error al parsear productos' });
@@ -1880,7 +1996,7 @@ app.get('/compra-detalle/:idcompra', (req, res) => {
 
 
 app.post('/nueva-compras-detalles', (req, res) => {
-    const { idcompra, productos } = req.body;
+    const { idcompra, productos, codigoCupon } = req.body; // Ahora recibe codigoCupon
 
     // Procesar los productos
     const productosProcesados = [];
@@ -1901,13 +2017,14 @@ app.post('/nueva-compras-detalles', (req, res) => {
             productosProcesados.push({
                 idproducto: producto.idproducto,
                 cantidad: producto.cantidad,
+                talla: producto.talla, // Guardar la talla
                 total_producto: total_producto
             });
 
             // Verificar si todos los productos han sido procesados
             if (index === productos.length - 1) {
-                // Crear los detalles de la compra
-                createComprasDetalles(idcompra, productosProcesados, (detalleErr) => {
+                // Crear los detalles de la compra incluyendo el codigoCupon
+                createComprasDetalles(idcompra, productosProcesados, codigoCupon, (detalleErr) => {
                     if (detalleErr) {
                         return res.status(500).send(detalleErr);
                     }
@@ -2476,44 +2593,6 @@ app.delete('/eliminar-compra-detalle/:iddetalle', (req, res) => {
     });
 });
 
-// Endpoint POST para crear un pago
-app.post('/crear-pago', async (req, res) => {
-    const { iduser, productos } = req.body;
-
-    try {
-        // Verificar que el usuario existe
-        const userQuery = 'SELECT * FROM users WHERE iduser = ?';
-        db.query(userQuery, [iduser], (userErr, userResults) => {
-            if (userErr) {
-                res.status(500).send(userErr);
-                return;
-            }
-            if (userResults.length === 0) {
-                res.status(404).json({ message: 'Usuario no encontrado' });
-                return;
-            }
-
-            // Calcular el total de la compra
-            const total = productos.reduce((acc, producto) => acc + producto.precio * producto.cantidad, 0);
-
-            // Crear el PaymentIntent en Stripe
-            stripe.paymentIntents.create({
-                amount: total * 100, // Stripe usa centavos
-                currency: 'usd',
-                metadata: { iduser }, // Opcional: Añadir información adicional
-            }).then(paymentIntent => {
-                res.status(200).json({
-                    clientSecret: paymentIntent.client_secret,
-                    paymentIntentId: paymentIntent.id,
-                });
-            }).catch(err => {
-                res.status(500).json({ message: 'Error creando el pago con Stripe', error: err });
-            });
-        });
-    } catch (error) {
-        res.status(500).json({ message: 'Error procesando el pago', error });
-    }
-});
 
 app.get('/cupones', (req, res) => {
     const query = 'SELECT * FROM cupones'; // Consulta para obtener todos los cupones
