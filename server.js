@@ -601,6 +601,52 @@ app.post('/registrar-visita', (req, res) => {
   });
 });
 // AQUI EMPIEZAN LAS GRAFICAS
+
+// Ruta GET para obtener el conteo de usuarios por sexo
+app.get('/usuarios-por-sexo', (req, res) => {
+  const query = `
+    SELECT 
+      sexo, 
+      COUNT(*) AS cantidad 
+    FROM 
+      users 
+    WHERE 
+      sexo IN ('hombre', 'mujer') 
+    GROUP BY 
+      sexo;
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error al obtener los usuarios por sexo:', err);
+      res.status(500).json({ error: 'Error al obtener los usuarios por sexo' });
+      return;
+    }
+    res.status(200).json(result);
+  });
+});
+// Ruta GET para obtener el conteo de usuarios por rangos de edad
+app.get('/usuarios-por-edad', (req, res) => {
+  const query = `
+    SELECT 
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 10 AND 15 THEN 1 ELSE 0 END) AS '10-15',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 16 AND 20 THEN 1 ELSE 0 END) AS '16-20',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 21 AND 35 THEN 1 ELSE 0 END) AS '21-35',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 36 AND 50 THEN 1 ELSE 0 END) AS '36-50',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 51 AND 70 THEN 1 ELSE 0 END) AS '51-70'
+    FROM users;
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error al obtener los usuarios por edad:', err);
+      res.status(500).json({ error: 'Error al obtener los usuarios por edad' });
+      return;
+    }
+    res.status(200).json(result[0]); // Devuelve el primer (y único) registro con los rangos de edad
+  });
+});
+
 // Ruta GET para obtener compras por mes
 app.get('/compras-por-mes', (req, res) => {
   const query = `
