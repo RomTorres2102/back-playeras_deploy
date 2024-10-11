@@ -490,6 +490,34 @@ const deleteSlide = (idfoto, callback) => {
     db.query(query, [idfoto], callback);
 };
 
+//modelo de detalle de entrega
+
+const createDetalleEntrega = (idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono, callback) => {
+    const query = `
+        INSERT INTO detalle_entrega 
+        (idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    db.query(query, [idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono], callback); 
+    };
+
+
+
+const updateDetalleEntrega = (identrega, idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono, callback) => {
+    const query = `UPDATE detalle_entrega SET 
+                    idcompra = ?, pais = ?, nombre = ?, apellidos = ?, direccion = ?, colonia = ?, codigo_postal = ?, ciudad = ?, estado = ?, telefono = ? 
+                  WHERE identrega = ?`;
+    db.query(query, [idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono, identrega], callback);
+};
+
+
+const deleteDetalleEntrega = (identrega, callback) => {
+    const query = 'DELETE FROM detalle_entrega WHERE identrega = ?';
+    db.query(query, [identrega], callback);
+};
+
+
 // Endpoint para capturar la orden una vez que el cliente paga en PayPal
 app.post('/capture-order', async (req, res) => {
     const { orderID, iduser } = req.body; // Asegúrate de pasar el iduser
@@ -1719,7 +1747,10 @@ app.get('/compra/usuario/:iduser', (req, res) => {
 
 
 app.post('/nueva-compras', (req, res) => {
-    const { fecha, iduser, productos, codigoCupon } = req.body; // Recibe también la talla en productos
+    const { fecha, iduser, productos, codigoCupon, detalleEntrega } = req.body;
+
+    // Desestructurar los valores de detalleEntrega
+    const { pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono } = detalleEntrega;
 
     console.log('Datos recibidos en la solicitud:', req.body);
 
@@ -1752,23 +1783,33 @@ app.post('/nueva-compras', (req, res) => {
                 });
 
                 if (index === productos.length - 1) {
-    createCompras(fecha, iduser, productosProcesados, (compraErr, compraResults) => {
-        if (compraErr) {
-            console.error('Error al crear la compra:', compraErr);
-            return res.status(500).json({ message: 'Error interno del servidor' });
-        }
+                    createCompras(fecha, iduser, productosProcesados, (compraErr, compraResults) => {
+                        if (compraErr) {
+                            console.error('Error al crear la compra:', compraErr);
+                            return res.status(500).json({ message: 'Error interno del servidor' });
+                        }
 
-        const idcompra = compraResults.insertId;
-        // Pasar el codigoCupon al crear los detalles de la compra
-        createComprasDetalles(idcompra, productosProcesados, codigoCupon, (detalleErr) => {
-            if (detalleErr) {
-                console.error('Error al crear los detalles de la compra:', detalleErr);
-                return res.status(500).json({ message: 'Error interno del servidor' });
-            }
-            res.status(201).json({ message: 'Compra y detalles creados exitosamente' });
-        });
-    });
-}
+                        const idcompra = compraResults.insertId;
+
+                        // Crear los detalles de la compra
+                        createComprasDetalles(idcompra, productosProcesados, codigoCupon, (detalleErr) => {
+                            if (detalleErr) {
+                                console.error('Error al crear los detalles de la compra:', detalleErr);
+                                return res.status(500).json({ message: 'Error interno del servidor' });
+                            }
+
+                            // Crear el detalle de entrega
+                            createDetalleEntrega(idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono, (entregaErr) => {
+                                if (entregaErr) {
+                                    console.error('Error al crear el detalle de entrega:', entregaErr);
+                                    return res.status(500).json({ message: 'Error interno del servidor al crear detalle de entrega' });
+                                }
+
+                                res.status(201).json({ message: 'Compra, detalles de compra y detalle de entrega creados exitosamente' });
+                            });
+                        });
+                    });
+                }
             });
         });
     };
@@ -1806,7 +1847,6 @@ app.post('/nueva-compras', (req, res) => {
         }
     });
 });
-
 
 
 // Endpoint PUT para actualizar una compra
@@ -2725,6 +2765,86 @@ app.get('/cupones/:idcupon', (req, res) => {
 });
 
 
+app.get('/detalle-entrega', (req, res) => {
+    const query = 'SELECT * FROM detalle_entrega';
+    db.query(query, (err, results) => {
+        if (err) return res.status(500).send(err);
+        res.json(results);
+    });
+});
+
+app.get('/detalle-entrega/:identrega', (req, res) => {
+    const { identrega } = req.params;
+
+    const query = 'SELECT * FROM detalle_entrega WHERE identrega = ?';
+
+    db.query(query, [identrega], (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Error al buscar el detalle de entrega' });
+        }
+
+        if (result.length === 0) {
+            return res.status(404).json({ message: 'Detalle de entrega no encontrado' });
+        }
+
+        res.json(result[0]);
+    });
+});
+
+
+
+// Ruta para obtener un detalle de entrega por idcompra
+app.get('/detalle-entregaxcompra/:idcompra', (req, res) => {
+    const { idcompra } = req.params;
+
+    const query = 'SELECT * FROM detalle_entrega WHERE idcompra = ?';
+    
+    db.query(query, [idcompra], (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Error al buscar el detalle de entrega' });
+        }
+
+        if (result.length === 0) {
+            return res.status(404).json({ message: 'Detalle de entrega no encontrado' });
+        }
+
+        // Devolver todos los registros como array, no solo el primero
+        res.json(result);
+    });
+});
+
+
+
+
+app.post('/nuevo-detalle-entrega', (req, res) => {
+    const { idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono } = req.body;
+    createDetalleEntrega(idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono, (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.status(201).json({ message: 'Detalle de entrega creado con éxito', identrega: result.insertId });
+    });
+});
+
+
+
+app.put('/actualizar-detalle-entrega/:identrega', (req, res) => {
+    const { identrega } = req.params;
+    const { idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono } = req.body;
+
+    updateDetalleEntrega(identrega, idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono, (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.json({ message: 'Detalle de entrega actualizado con éxito' });
+    });
+});
+
+
+app.delete('/eliminar-detalle-entrega/:identrega', (req, res) => {
+    const { identrega } = req.params;
+
+    deleteDetalleEntrega(identrega, (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.json({ message: 'Detalle de entrega eliminado con éxito' });
+    });
+});
 
 
 const port = process.env.PORT || 5000;
