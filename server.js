@@ -630,6 +630,84 @@ app.post('/registrar-visita', (req, res) => {
 });
 // AQUI EMPIEZAN LAS GRAFICAS
 
+// Función para obtener compras por producto y mes usando JSON_EXTRACT
+const getComprasOrdenadasPorMes = (callback) => {
+    const query = `
+        SELECT 
+            p.nomprod AS producto, 
+            DATE_FORMAT(c.fecha, '%Y-%m') AS mes,
+            SUM(CASE 
+                WHEN JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[0].cantidad')) IS NOT NULL 
+                THEN JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[0].cantidad')) 
+                ELSE 0 
+            END) +
+            SUM(CASE 
+                WHEN JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[1].cantidad')) IS NOT NULL 
+                THEN JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[1].cantidad')) 
+                ELSE 0 
+            END) +
+            SUM(CASE 
+                WHEN JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[2].cantidad')) IS NOT NULL 
+                THEN JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[2].cantidad')) 
+                ELSE 0 
+            END) AS total_comprado
+        FROM compras c
+        JOIN producto p ON JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[0].idproducto')) = p.idproducto
+        GROUP BY p.nomprod, mes
+        ORDER BY mes, producto;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return callback(err, null);
+        }
+        callback(null, results);
+    });
+};
+
+// Endpoint para obtener las compras ordenadas por producto y mes desde la tabla 'compras'
+app.get('/compras-ordenadas', (req, res) => {
+    getComprasOrdenadasPorMes((err, results) => {
+        if (err) {
+            return res.status(500).send('Error al obtener las compras ordenadas');
+        }
+        res.status(200).json(results);
+    });
+});
+
+// Función para obtener órdenes por mes
+const getOrdenesPorMes = (callback) => {
+    const query = `
+        SELECT 
+            DATE_FORMAT(fecha, '%Y-%m') AS mes, 
+            COUNT(*) AS total_ordenes
+        FROM 
+            compras
+        GROUP BY 
+            mes
+        ORDER BY 
+            mes;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return callback(err, null);
+        }
+        callback(null, results);
+    });
+};
+
+// Endpoint para obtener las órdenes ordenadas por mes
+app.get('/ordenes-por-mes-c', (req, res) => {
+    getOrdenesPorMes((err, results) => {
+        if (err) {
+            return res.status(500).send('Error al obtener las órdenes por mes');
+        }
+        res.status(200).json(results);
+    });
+});
+
+
 // Ruta GET para obtener el conteo de usuarios por sexo
 app.get('/usuarios-por-sexo', (req, res) => {
   const query = `
@@ -697,6 +775,63 @@ app.get('/compras-por-mes', (req, res) => {
     }
     res.status(200).json(result);
   });
+});
+// Ruta GET para obtener los usuarios por rangos de edad
+app.get('/rango-por-edad', (req, res) => {
+    const query = `
+     SELECT 
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 10 AND 20 THEN 1 ELSE 0 END) AS '10-20',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 21 AND 35 THEN 1 ELSE 0 END) AS '21-35',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 36 AND 50 THEN 1 ELSE 0 END) AS '36-50',
+      SUM(CASE WHEN TIMESTAMPDIFF(YEAR, fecha_nacimiento, CURDATE()) BETWEEN 51 AND 80 THEN 1 ELSE 0 END) AS '51-80'
+    FROM users;
+    `;
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener los usuarios por edad:', err);
+        res.status(500).json({ error: 'Error al obtener los usuarios por edad' });
+        return;
+      }
+
+      // Agregar console.log para verificar los datos que devuelve la consulta
+      console.log('Resultado de la consulta:', result);
+
+      res.status(200).json(result[0]);
+    });
+});
+
+
+// Función para obtener nuevos usuarios mensuales
+const getNuevosUsuariosMensuales = (callback) => {
+    const query = `
+        SELECT 
+            DATE_FORMAT(created_at, '%M %Y') AS mes,
+            COUNT(*) AS total_nuevos
+        FROM 
+            users
+        GROUP BY 
+            mes
+        ORDER BY 
+            MIN(created_at);
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return callback(err, null);
+        }
+        callback(null, results);
+    });
+};
+
+// Endpoint para obtener nuevos usuarios mensuales
+app.get('/nuevos-usuarios-mensuales', (req, res) => {
+    getNuevosUsuariosMensuales((err, results) => {
+        if (err) {
+            return res.status(500).send('Error al obtener nuevos usuarios mensuales');
+        }
+        res.status(200).json(results);
+    });
 });
 
 app.get('/ordenes-por-mes', (req, res) => {
