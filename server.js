@@ -518,37 +518,72 @@ const deleteDetalleEntrega = (identrega, callback) => {
 };
 
 
-// Endpoint para capturar la orden una vez que el cliente paga en PayPal
+// Ruta para capturar la orden de PayPal
 app.post('/capture-order', async (req, res) => {
-    const { orderID, iduser } = req.body; // Asegúrate de pasar el iduser
+    console.log('Solicitud de captura recibida:', req.body);
+
+    const { orderID, iduser } = req.body;
 
     const request = new paypal.orders.OrdersCaptureRequest(orderID);
     request.requestBody({});
 
     try {
         const capture = await client.execute(request);
+        console.log('Respuesta de captura:', capture.result);
 
-        // Extraer la información relevante de la captura
-        const status = capture.result.status;
-        const total = capture.result.purchase_units[0].amount.value;
-        const currency = capture.result.purchase_units[0].amount.currency_code;
-        const description = capture.result.purchase_units[0].description;
+        const purchaseUnit = capture.result.purchase_units ? capture.result.purchase_units[0] : null;
 
-        // Guardar los logs en la base de datos
-        const logQuery = `
-            INSERT INTO paypal_logs (order_id, status, iduser, total, currency, description, details)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+        if (!purchaseUnit) {
+            console.error('Error: No se encontró la información de la unidad de compra en la captura.');
+            return res.status(500).json({ message: 'No se encontró la información de la unidad de compra en la captura' });
+        }
+
+        console.log('Contenido de purchase_units[0]:', purchaseUnit);
+
+        if (!purchaseUnit.payments || !purchaseUnit.payments.captures || !purchaseUnit.payments.captures[0]) {
+            console.error('Error: No se encontró la captura de pagos.');
+            return res.status(500).json({ message: 'No se encontró la captura de pagos en la respuesta' });
+        }
+
+        const captureDetail = purchaseUnit.payments.captures[0];
+        const total = captureDetail.amount.value;
+        const currency = captureDetail.amount.currency_code;
+        const description = captureDetail.note_to_payer || 'Pago Finalizado';
+
+        console.log('Estado de la orden:', capture.result.status);
+
+        if (capture.result.status !== 'COMPLETED') {
+            console.error('Error: la orden no fue completada');
+            return res.status(400).json({ message: 'La orden no fue completada', details: capture.result });
+        }
+
+        // Actualizar el registro existente en lugar de crear uno nuevo
+        const updateQuery = `
+            UPDATE paypal_logs 
+            SET status = ?, total = ?, currency = ?, description = ?, details = ?
+            WHERE order_id = ? AND iduser = ?
         `;
-        const details = JSON.stringify(capture.result); // Guardar todos los detalles en formato JSON
-        db.query(logQuery, [orderID, status, iduser, total, currency, description, details], (logErr, logResult) => {
-            if (logErr) {
-                console.error('Error al guardar el log de PayPal:', logErr);
-                return res.status(500).json({ message: 'Error interno al guardar el log de PayPal' });
+        const details = JSON.stringify(capture.result);
+        
+        db.query(updateQuery, [capture.result.status, total, currency, description, details, orderID, iduser], (updateErr, updateResult) => {
+            if (updateErr) {
+                console.error('Error al actualizar el log de PayPal:', updateErr);
+                return res.status(500).json({ message: 'Error interno al actualizar el log de PayPal' });
             }
 
-            res.json({ status: capture.result.status, details: capture.result }); // Enviar los detalles de la captura
+            if (updateResult.affectedRows === 0) {
+                console.error('No se encontró un registro para actualizar');
+                return res.status(404).json({ message: 'No se encontró un registro para actualizar' });
+            }
+
+            res.json({ status: capture.result.status, details: capture.result });
         });
     } catch (err) {
+        if (err.statusCode === 422 && err.message.includes("ORDER_ALREADY_CAPTURED")) {
+            console.error('Error: La orden ya fue capturada anteriormente');
+            return res.status(400).json({ message: 'La orden ya fue capturada anteriormente' });
+        }
+
         console.error('Error al capturar la orden:', err);
         res.status(500).send('Error al capturar la orden de PayPal');
     }
@@ -567,7 +602,7 @@ app.post('/create-order', async (req, res) => {
                 currency_code: currency || 'USD',
                 value: total
             },
-            description: description || 'Compra en Mi Sitio Web'
+            description: description || 'Compra en Proceso'
         }],
         application_context: {
             return_url: "http://localhost:5173/carrito",
@@ -578,12 +613,11 @@ app.post('/create-order', async (req, res) => {
     try {
         const order = await client.execute(request);
 
-        // Guardar los logs de la orden creada
         const logQuery = `
             INSERT INTO paypal_logs (order_id, status, iduser, total, currency, description, details)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
-        const details = JSON.stringify(order.result); // Guardar todos los detalles en formato JSON
+        const details = JSON.stringify(order.result);
         db.query(logQuery, [order.result.id, 'CREATED', iduser, total, currency, description, details], (logErr, logResult) => {
             if (logErr) {
                 console.error('Error al guardar el log de PayPal:', logErr);
@@ -2979,6 +3013,98 @@ app.delete('/eliminar-detalle-entrega/:identrega', (req, res) => {
         if (err) return res.status(500).send(err);
         res.json({ message: 'Detalle de entrega eliminado con éxito' });
     });
+});
+
+
+// Endpoint para obtener los detalles de la compra y los detalles de entrega
+app.get('/generar-pdf/:idcompra', (req, res) => {
+  const { idcompra } = req.params;
+
+  // Consulta para obtener los detalles de la compra
+  const queryCompras = 'SELECT idcompra, iduser, productos, total, fecha FROM compras WHERE idcompra = ?';
+
+  // Consulta para obtener los detalles de la compra (compras_detalle)
+  const queryComprasDetalle = 'SELECT iddetalle, idcompra, productos, total, codigoCupon FROM compras_detalle WHERE idcompra = ?';
+
+  // Consulta para obtener los detalles de entrega
+  const queryDetalleEntrega = 'SELECT identrega, idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono FROM detalle_entrega WHERE idcompra = ?';
+
+  db.query(queryCompras, [idcompra], (err, comprasResults) => {
+    if (err) {
+      return res.status(500).send(err);
+    }
+
+    if (comprasResults.length === 0) {
+      return res.status(404).json({ message: 'Compra no encontrada' });
+    }
+
+    const compra = comprasResults[0];
+
+    db.query(queryComprasDetalle, [idcompra], (err, comprasDetalleResults) => {
+      if (err) {
+        return res.status(500).send(err);
+      }
+
+      if (comprasDetalleResults.length === 0) {
+        return res.status(404).json({ message: 'Detalles de compra no encontrados' });
+      }
+
+      const comprasDetalle = comprasDetalleResults[0];
+
+      db.query(queryDetalleEntrega, [idcompra], (err, detalleEntregaResults) => {
+        if (err) {
+          return res.status(500).send(err);
+        }
+
+        if (detalleEntregaResults.length === 0) {
+          return res.status(404).json({ message: 'Detalles de entrega no encontrados' });
+        }
+
+        const detalleEntrega = detalleEntregaResults[0];
+
+        // Procesar los productos de la compra
+        let productosParsed;
+
+        try {
+          productosParsed = typeof compra.productos === 'string'
+            ? JSON.parse(compra.productos)
+            : compra.productos;
+
+          // Para cada producto, obtenemos su nombre desde la tabla producto
+          const productosConNombre = productosParsed.map(producto => {
+            return new Promise((resolve, reject) => {
+              const productQuery = 'SELECT nomprod FROM producto WHERE idproducto = ?';
+              db.query(productQuery, [producto.idproducto], (err, productResults) => {
+                if (err) return reject(err);
+
+                // Reemplazar idproducto por nomprod
+                if (productResults.length > 0) {
+                  producto.idproducto = productResults[0].nomprod;
+                } else {
+                  producto.idproducto = null;
+                }
+                resolve(producto);
+              });
+            });
+          });
+
+          // Retornamos una promesa que espera a que todos los nombres de productos se obtengan
+          return Promise.all(productosConNombre).then(productos => {
+            res.json({
+              compra,
+              comprasDetalle,
+              detalleEntrega,
+              productos
+            });
+          }).catch(err => {
+            throw err;
+          });
+        } catch (error) {
+          throw new Error('Error al parsear productos');
+        }
+      });
+    });
+  });
 });
 
 
