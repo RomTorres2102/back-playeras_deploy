@@ -631,6 +631,48 @@ app.post('/create-order', async (req, res) => {
         res.status(500).send('Error al crear la orden de PayPal');
     }
 });
+// Endpoint para crear una orden de PayPal
+app.post('/create-orders', async (req, res) => {
+    const { total, currency, description, iduser } = req.body;
+
+    const request = new paypal.orders.OrdersCreateRequest();
+    request.prefer("return=representation");
+    request.requestBody({
+        intent: 'CAPTURE',
+        purchase_units: [{
+            amount: {
+                currency_code: currency || 'USD',
+                value: total
+            },
+            description: description || 'Compra en Proceso'
+        }],
+        application_context: {
+            return_url: "http://localhost:5173/ventanillas/:id",
+            cancel_url: "http://localhost:5173/perfil"
+        }
+    });
+
+    try {
+        const order = await client.execute(request);
+
+        const logQuery = `
+            INSERT INTO paypal_logs (order_id, status, iduser, total, currency, description, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `;
+        const details = JSON.stringify(order.result);
+        db.query(logQuery, [order.result.id, 'CREATED', iduser, total, currency, description, details], (logErr, logResult) => {
+            if (logErr) {
+                console.error('Error al guardar el log de PayPal:', logErr);
+                return res.status(500).json({ message: 'Error interno al guardar el log de PayPal' });
+            }
+
+            res.json({ id: order.result.id, links: order.result.links });
+        });
+    } catch (err) {
+        console.error('Error al crear la orden:', err);
+        res.status(500).send('Error al crear la orden de PayPal');
+    }
+});
 
 // Endpoint GET para obtener todas las fotos del carrusel
 app.get('/carrusel', (req, res) => {
