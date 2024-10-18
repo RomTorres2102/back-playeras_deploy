@@ -1547,23 +1547,28 @@ app.delete('/eliminar-producto/:idproducto', (req, res) => {
 // Endpoint GET para buscar producto por nombre
 app.get('/buscar-producto', (req, res) => {
     const { nombre } = req.query;
-    searchProducto(nombre, (err, results) => {
-        if (err) {
-            res.status(500).send(err);
-            return;
-        }
-        if (results.length === 0) {
-            res.status(404).json({ message: 'Producto no encontrado' });
-            return;
-        }
-        res.status(200).json(results);
-    });
-}); 
-
-// Endpoint GET para buscar productos con descuento por nombre
-app.get('/buscar-producto-descuento', (req, res) => {
-    const { nombre } = req.query;
-    const query = 'SELECT * FROM producto WHERE nomprod LIKE ? AND descuento > 0';
+    
+    const query = `
+        SELECT 
+            producto.*, 
+            IFNULL(ROUND(
+                (
+                    SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+                    SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+                    SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+                    SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+                    SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+                ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+        FROM 
+            producto
+        LEFT JOIN 
+            comentarios ON producto.idproducto = comentarios.idproducto
+        WHERE 
+            producto.nomprod LIKE ?
+        GROUP BY 
+            producto.idproducto
+    `;
+    
     db.query(query, [`%${nombre}%`], (err, results) => {
         if (err) {
             res.status(500).send(err);
@@ -1576,6 +1581,44 @@ app.get('/buscar-producto-descuento', (req, res) => {
         res.status(200).json(results);
     });
 });
+
+// Endpoint GET para buscar productos con descuento por nombre
+app.get('/buscar-producto-descuento', (req, res) => {
+    const { nombre } = req.query;
+    const query = `
+        SELECT 
+            producto.*, 
+            IFNULL(ROUND(
+                (
+                    SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+                    SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+                    SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+                    SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+                    SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+                ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+        FROM 
+            producto
+        LEFT JOIN 
+            comentarios ON producto.idproducto = comentarios.idproducto
+        WHERE 
+            producto.nomprod LIKE ? AND producto.descuento > 0
+        GROUP BY 
+            producto.idproducto
+    `;
+    
+    db.query(query, [`%${nombre}%`], (err, results) => {
+        if (err) {
+            res.status(500).send(err);
+            return;
+        }
+        if (results.length === 0) {
+            res.status(404).json({ message: 'Producto no encontrado' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
 //endpoint para obtener las claves
 app.get('/claves-productos', (req, res) => {
   const query = 'SELECT DISTINCT clave FROM producto';
@@ -1587,18 +1630,43 @@ app.get('/claves-productos', (req, res) => {
     res.status(200).json(results);
   });
 });
-//endpoint para obtener un producto por clave
+// Endpoint para obtener un producto por clave
 app.get('/clave-producto/:clave', (req, res) => {
-  const { clave } = req.params;
-  const query = 'SELECT * FROM producto WHERE clave = ?';
-  db.query(query, [clave], (err, results) => {
-    if (err) {
-      res.status(500).send(err);    
-      return;
-    }
-    res.status(200).json(results);
+    const { clave } = req.params;
+    
+    const query = `
+      SELECT 
+        producto.*, 
+        IFNULL(ROUND(
+          (
+            SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+            SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+            SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+            SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+            SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+          ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+      FROM 
+        producto
+      LEFT JOIN 
+        comentarios ON producto.idproducto = comentarios.idproducto
+      WHERE 
+        producto.clave = ?
+      GROUP BY 
+        producto.idproducto
+    `;
+  
+    db.query(query, [clave], (err, results) => {
+      if (err) {
+        res.status(500).send(err);
+        return;
+      }
+      if (results.length === 0) {
+        res.status(404).json({ message: 'Producto no encontrado' });
+        return;
+      }
+      res.status(200).json(results);
+    });
   });
-});
 
 // Endpoint para obtener las claves de los productos con descuento
 app.get('/claves-productos-con-descuento', (req, res) => {
@@ -1614,16 +1682,41 @@ app.get('/claves-productos-con-descuento', (req, res) => {
 
 // Endpoint para obtener productos con descuento por clave
 app.get('/clave-producto-con-descuento/:clave', (req, res) => {
-  const { clave } = req.params;
-  const query = 'SELECT * FROM producto WHERE clave = ? AND descuento > 0';
-  db.query(query, [clave], (err, results) => {
-    if (err) {
-      res.status(500).send(err);
-      return;
-    }
-    res.status(200).json(results);
+    const { clave } = req.params;
+    
+    const query = `
+      SELECT 
+        producto.*, 
+        IFNULL(ROUND(
+          (
+            SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+            SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+            SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+            SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+            SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+          ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+      FROM 
+        producto
+      LEFT JOIN 
+        comentarios ON producto.idproducto = comentarios.idproducto
+      WHERE 
+        producto.clave = ? AND producto.descuento > 0
+      GROUP BY 
+        producto.idproducto
+    `;
+  
+    db.query(query, [clave], (err, results) => {
+      if (err) {
+        res.status(500).send(err);
+        return;
+      }
+      if (results.length === 0) {
+        res.status(404).json({ message: 'Producto no encontrado' });
+        return;
+      }
+      res.status(200).json(results);
+    });
   });
-});
 
 
 // Endpoint para obtener productos aleatorios por clave
