@@ -1387,7 +1387,28 @@ app.get('/productos', (req, res) => {
 
 // Endpoint para obtener los primeros 4 registros más recientes
 app.get('/productos-recientes', (req, res) => {
-  const query = 'SELECT * FROM producto ORDER BY created_at DESC LIMIT 4';
+  const query = `
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    GROUP BY 
+      producto.idproducto
+    ORDER BY 
+      created_at DESC 
+    LIMIT 4
+  `;
+
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send(err);
@@ -1609,11 +1630,28 @@ app.get('/clave-producto-con-descuento/:clave', (req, res) => {
 app.get('/productos-aleatorios/:id/:clave', (req, res) => {
   const { id, clave } = req.params;
   const query = `
-    SELECT * 
-    FROM producto 
-    WHERE clave = ? AND idproducto != ? 
-    ORDER BY RAND() 
-    LIMIT 4`; // Limitamos los resultados a 4
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    WHERE 
+      producto.clave = ? AND producto.idproducto != ?
+    GROUP BY 
+      producto.idproducto
+    ORDER BY 
+      RAND() 
+    LIMIT 4
+  `;
 
   db.query(query, [clave, id], (err, results) => {
     if (err) {
