@@ -204,26 +204,48 @@ const deleteEmail = async (idemail, callback) => {
     callback(err, null);
   }
 };
-// Funciones de modelo de Productos
-const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento,  callback) => {
-  try {
-    // Calculamos p_final basado en el descuento
-    const p_final = p_producto - (p_producto * (descuento / 100));
 
-    const query = 'INSERT INTO producto (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final], callback);
+//personalizacion
+const createPersonalizacion = async (idproducto, texto_personalizado, imagen_personalizada, color, callback) => {
+  try {
+    const query = 'INSERT INTO personalizaciones (idproducto, texto_personalizado, imagen_personalizada, color) VALUES (?, ?, ?, ?)';
+    db.query(query, [idproducto, texto_personalizado, imagen_personalizada, color], callback);
   } catch (err) {
     callback(err, null);
   }
 };
 
-const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento,  callback) => {
+const updatePersonalizacion = async (idpersonalizacion, idproducto, texto_personalizado, imagen_personalizada, color, callback) => {
   try {
-    // Calculamos p_final basado en el descuento
+    const query = 'UPDATE personalizaciones SET idproducto = ?, texto_personalizado = ?, imagen_personalizada = ?, color = ? WHERE idpersonalizacion = ?';
+    db.query(query, [idproducto, texto_personalizado, imagen_personalizada, color, idpersonalizacion], callback);
+  } catch (err) {
+    callback(err, null);
+  }
+};
+
+const deletePersonalizacion = (idpersonalizacion, callback) => {
+  const query = 'DELETE FROM personalizaciones WHERE idpersonalizacion = ?';
+  db.query(query, [idpersonalizacion], callback);
+};
+
+// Funciones de modelo de Productos
+const createProducto = async (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, tipo_personalizacion, callback) => {
+  try {
     const p_final = p_producto - (p_producto * (descuento / 100));
 
-    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ?, descuento = ?,  p_final = ? WHERE idproducto = ?';
-    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final, idproducto], callback);
+    const query = 'INSERT INTO producto (p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final, tipo_personalizacion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final, tipo_personalizacion], callback);
+  } catch (err) {
+    callback(err, null);
+  }
+};
+const updateProducto = async (idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, tipo_personalizacion, callback) => {
+  try {
+    const p_final = p_producto - (p_producto * (descuento / 100));
+
+    const query = 'UPDATE producto SET p_producto = ?, nomprod = ?, clave = ?, descripcion = ?, foto = ?, foto2 = ?, foto3 = ?, descuento = ?, p_final = ?, tipo_personalizacion = ? WHERE idproducto = ?';
+    db.query(query, [p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, p_final, tipo_personalizacion, idproducto], callback);
   } catch (err) {
     callback(err, null);
   }
@@ -1371,6 +1393,38 @@ app.get('/productos', (req, res) => {
       producto
     LEFT JOIN 
       comentarios ON producto.idproducto = comentarios.idproducto
+    WHERE 
+      producto.tipo_personalizacion = 'no_personalizado'  -- Agregada esta línea
+    GROUP BY 
+      producto.idproducto
+  `;
+
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
+app.get('/productos-personalizados', (req, res) => {
+  const query = `
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    WHERE 
+      producto.tipo_personalizacion = 'personalizado'  
     GROUP BY 
       producto.idproducto
   `;
@@ -1384,7 +1438,34 @@ app.get('/productos', (req, res) => {
   });
 });
 
+app.get('/productos-admin', (req, res) => {
+  const query = `
+    SELECT 
+      producto.*, 
+      IFNULL(ROUND(
+        (
+          SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+          SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+          SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+          SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+          SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+        ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+    FROM 
+      producto
+    LEFT JOIN 
+      comentarios ON producto.idproducto = comentarios.idproducto
+    GROUP BY 
+      producto.idproducto
+  `;
 
+  db.query(query, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(200).json(results);
+  });
+});
 // Endpoint para obtener los primeros 4 registros más recientes
 app.get('/productos-recientes', (req, res) => {
   const query = `
@@ -1492,12 +1573,11 @@ app.get('/productos/:id', (req, res) => {
 
 // Endpoint POST para agregar producto
 app.post('/nuevo-producto', async (req, res) => {
-  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento  } = req.body;
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, tipo_personalizacion } = req.body;
 
-  // Validar si se ha enviado un descuento, de lo contrario poner 0
   const descuentoAplicado = descuento || 0;
 
-  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado,  (err, results) => {
+  createProducto(p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado, tipo_personalizacion, (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -1509,12 +1589,11 @@ app.post('/nuevo-producto', async (req, res) => {
 // Endpoint PUT para actualizar un producto
 app.put('/actualizar-producto/:idproducto', async (req, res) => {
   const { idproducto } = req.params;
-  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento  } = req.body;
+  const { p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, tipo_personalizacion } = req.body;
 
-  // Validar si se ha enviado un descuento, de lo contrario poner 0
   const descuentoAplicado = descuento || 0;
 
-  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado,  (err, results) => {
+  updateProducto(idproducto, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuentoAplicado, tipo_personalizacion, (err, results) => {
     if (err) {
       res.status(500).send(err);
       return;
@@ -3277,6 +3356,52 @@ app.get('/generar-pdf/:idcompra', (req, res) => {
         }
       });
     });
+  });
+});
+// Endpoint POST para agregar personalización
+app.post('/nueva-personalizacion', async (req, res) => {
+  const { idproducto, texto_personalizado, imagen_personalizada, color } = req.body;
+
+  createPersonalizacion(idproducto, texto_personalizado, imagen_personalizada, color, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    res.status(201).json({ message: 'Personalización agregada exitosamente' });
+  });
+});
+
+// Endpoint PUT para actualizar una personalización
+app.put('/actualizar-personalizacion/:idpersonalizacion', async (req, res) => {
+  const { idpersonalizacion } = req.params;
+  const { idproducto, texto_personalizado, imagen_personalizada, color } = req.body;
+
+  updatePersonalizacion(idpersonalizacion, idproducto, texto_personalizado, imagen_personalizada, color, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    if (results.affectedRows === 0) {
+      res.status(404).json({ message: 'Personalización no encontrada' });
+      return;
+    }
+    res.status(200).json({ message: 'Información de la personalización actualizada exitosamente' });
+  });
+});
+
+// Endpoint DELETE para eliminar una personalización
+app.delete('/eliminar-personalizacion/:idpersonalizacion', (req, res) => {
+  const { idpersonalizacion } = req.params;
+  deletePersonalizacion(idpersonalizacion, (err, results) => {
+    if (err) {
+      res.status(500).send(err);
+      return;
+    }
+    if (results.affectedRows === 0) {
+      res.status(404).json({ message: 'Personalización no encontrada' });
+      return;
+    }
+    res.status(200).json({ message: 'Personalización eliminada exitosamente' });
   });
 });
 
