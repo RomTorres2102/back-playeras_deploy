@@ -3410,3 +3410,131 @@ const port = process.env.PORT || 5000;
 app.listen(port, () => {
     console.log(`Servidor funcionando en el puerto ${port}`);
 });
+
+// Endpoint para obtener los productos más calificados
+app.get('/productos-mas-calificados', (req, res) => {
+    const query = `
+      SELECT p.idproducto, p.nomprod, AVG(c.calificacion) AS promedio_calificacion
+      FROM producto p
+      JOIN comentarios c ON p.idproducto = c.idproducto
+      GROUP BY p.idproducto
+      ORDER BY promedio_calificacion DESC
+      LIMIT 3;  -- Puedes ajustar el límite según lo que necesites
+    `;
+  
+    db.query(query, (err, results) => {
+      if (err) {
+        console.error('Error al obtener los productos más calificados:', err);
+        res.status(500).json({ error: 'Error al obtener los productos más calificados' });
+        return;
+      }
+      res.status(200).json(results);
+    });
+  });
+// Endpoint para obtener la cantidad de administradores
+app.get('/cantidad-administradores', (req, res) => {
+    // Cambia '2' por el idrol correspondiente al rol de administrador en tu base de datos
+    const idRolAdministrador = 2; 
+    const query = 'SELECT COUNT(*) AS cantidad_administradores FROM users WHERE idrol = ?';
+  
+    db.query(query, [idRolAdministrador], (err, result) => {
+      if (err) {
+        console.error('Error al obtener la cantidad de administradores:', err);
+        res.status(500).json({ error: 'Error al obtener la cantidad de administradores' });
+        return;
+      }
+      res.status(200).json({ cantidad_administradores: result[0].cantidad_administradores });
+    });
+  });
+ // Endpoint para obtener la cantidad total de usuarios
+app.get('/cantidad-usuarios', (req, res) => {
+    const query = 'SELECT COUNT(*) AS cantidad_usuarios FROM users'; // Asegúrate de que la tabla y columna sean correctas
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener la cantidad de usuarios:', err);
+        res.status(500).json({ error: 'Error al obtener la cantidad de usuarios' });
+        return;
+      }
+      res.status(200).json({ cantidad_usuarios: result[0].cantidad_usuarios });
+    });
+  });
+
+  //Backend
+
+//TOP COMPRAS
+const getTopPurchasedProducts = (callback) => {
+    const query = `
+        SELECT 
+            p.idproducto,
+            p.nomprod AS nombre_producto,
+            p.foto AS foto,
+            SUM(
+                JSON_UNQUOTE(JSON_EXTRACT(productos, '$[0].cantidad')) +
+                IF(JSON_UNQUOTE(JSON_EXTRACT(productos, '$[1].cantidad')) IS NOT NULL, JSON_UNQUOTE(JSON_EXTRACT(productos, '$[1].cantidad')), 0) +
+                IF(JSON_UNQUOTE(JSON_EXTRACT(productos, '$[2].cantidad')) IS NOT NULL, JSON_UNQUOTE(JSON_EXTRACT(productos, '$[2].cantidad')), 0)
+            ) AS total_comprado
+        FROM compras c
+        JOIN producto p ON JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[0].idproducto')) = p.idproducto
+        GROUP BY p.idproducto, p.nomprod, p.foto
+        ORDER BY total_comprado DESC
+        LIMIT 10;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return callback(err, null);
+        }
+        callback(null, results);
+    });
+};
+
+// Uso de la función en un endpoint
+app.get('/top-productos-comprados', (req, res) => {
+    getTopPurchasedProducts((err, results) => {
+        if (err) {
+            return res.status(500).json({ error: 'Error al obtener los productos más comprados' });
+        }
+        res.status(200).json(results);
+    });
+});
+
+//TOP USERS
+const getTopUserPurchases = (callback) => {  
+    const query = `
+        SELECT 
+            u.user AS nombre_usuario,
+            u.foto AS foto_usuario,
+            c.iduser,
+            SUM(
+                COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[0].cantidad')) AS UNSIGNED), 0) +
+                COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[1].cantidad')) AS UNSIGNED), 0) +
+                COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[2].cantidad')) AS UNSIGNED), 0) +
+                COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[3].cantidad')) AS UNSIGNED), 0) +
+                COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[4].cantidad')) AS UNSIGNED), 0)
+            ) AS cantidad_compras
+        FROM compras c
+        JOIN users u ON c.iduser = u.iduser
+        GROUP BY c.iduser, u.user, u.foto
+        ORDER BY cantidad_compras DESC
+        LIMIT 10;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            return callback(err, null);
+        }
+        callback(null, results);
+    });
+};
+
+// Endpoint para obtener los 10 usuarios con más compras
+app.get('/top-usuarios-compras', (req, res) => {
+    getTopUserPurchases((err, results) => {
+        if (err) {
+            res.status(500).json({ error: 'Error al obtener el ranking de usuarios' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
