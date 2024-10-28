@@ -1394,7 +1394,7 @@ app.get('/productos', (req, res) => {
     LEFT JOIN 
       comentarios ON producto.idproducto = comentarios.idproducto
     WHERE 
-      producto.tipo_personalizacion = 'no_personalizado'  -- Agregada esta línea
+      producto.tipo_personalizacion = 'no_personalizado' 
     GROUP BY 
       producto.idproducto
   `;
@@ -1483,10 +1483,12 @@ app.get('/productos-recientes', (req, res) => {
       producto
     LEFT JOIN 
       comentarios ON producto.idproducto = comentarios.idproducto
+    WHERE 
+      producto.tipo_personalizacion = 'no_personalizado' 
     GROUP BY 
       producto.idproducto
     ORDER BY 
-      created_at DESC 
+      producto.created_at DESC 
     LIMIT 4
   `;
 
