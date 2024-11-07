@@ -1381,6 +1381,7 @@ app.get('/productos', (req, res) => {
   const query = `
     SELECT 
       producto.*, 
+      users.user AS nombre_usuario, 
       IFNULL(ROUND(
         (
           SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
@@ -1393,10 +1394,12 @@ app.get('/productos', (req, res) => {
       producto
     LEFT JOIN 
       comentarios ON producto.idproducto = comentarios.idproducto
+    LEFT JOIN 
+      users ON producto.iduser = users.iduser
     WHERE 
       producto.tipo_personalizacion = 'no_personalizado' 
     GROUP BY 
-      producto.idproducto
+      producto.idproducto, users.user
   `;
 
   db.query(query, (err, results) => {
@@ -1407,6 +1410,7 @@ app.get('/productos', (req, res) => {
     res.status(200).json(results);
   });
 });
+
 app.get('/productos-personalizados', (req, res) => {
   const query = `
     SELECT 
@@ -1751,7 +1755,7 @@ app.get('/clave-producto/:clave', (req, res) => {
 
 // Endpoint para obtener las claves de los productos con descuento
 app.get('/claves-productos-con-descuento', (req, res) => {
-  const query = 'SELECT clave FROM producto WHERE descuento > 0';
+  const query = 'SELECT DISTINCT clave FROM producto WHERE descuento > 0';
   db.query(query, (err, results) => {
     if (err) {
       res.status(500).send(err);
