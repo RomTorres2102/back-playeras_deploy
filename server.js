@@ -1451,6 +1451,43 @@ app.get('/productos-usuario/:iduser', (req, res) => {
       res.status(200).json(results);
     });
   });
+
+app.get('/productos-personalizados-usuario/:iduser', (req, res) => {
+    const { iduser } = req.params;
+  
+    const query = `
+      SELECT 
+        producto.*, 
+        users.user AS nombre_usuario, 
+        IFNULL(ROUND(
+          (
+            SUM(CASE WHEN comentarios.calificacion = 1 THEN 1 ELSE 0 END) * 1 +
+            SUM(CASE WHEN comentarios.calificacion = 2 THEN 1 ELSE 0 END) * 2 +
+            SUM(CASE WHEN comentarios.calificacion = 3 THEN 1 ELSE 0 END) * 3 +
+            SUM(CASE WHEN comentarios.calificacion = 4 THEN 1 ELSE 0 END) * 4 +
+            SUM(CASE WHEN comentarios.calificacion = 5 THEN 1 ELSE 0 END) * 5
+          ) / NULLIF(COUNT(comentarios.calificacion), 0), 2), 0) AS calificacion_final
+      FROM 
+        producto
+      LEFT JOIN 
+        comentarios ON producto.idproducto = comentarios.idproducto
+      LEFT JOIN 
+        users ON producto.iduser = users.iduser
+      WHERE 
+        producto.iduser = ? 
+        AND producto.tipo_personalizacion = 'personalizado'
+      GROUP BY 
+        producto.idproducto, users.user
+    `;
+  
+    db.query(query, [iduser], (err, results) => {
+      if (err) {
+        res.status(500).send(err);
+        return;
+      }
+      res.status(200).json(results);
+    });
+  });
   
   
 
