@@ -733,6 +733,174 @@ app.post('/registrar-visita', (req, res) => {
 });
 // AQUI EMPIEZAN LAS GRAFICAS
 
+// Endpoint para obtener el resumen de compras por año
+app.get('/resumen-compras', (req, res) => {
+    const query = `
+        WITH TotalCompras AS (
+            SELECT SUM(compra.total) AS Total
+            FROM compra
+        )
+        SELECT 
+            YEAR(compra.fecha) AS Año, 
+            COUNT(*) AS Count, 
+            SUM(compra.total) AS Sum, 
+            AVG(compra.total) AS Avg, 
+            ROUND((SUM(compra.total) / (SELECT Total FROM TotalCompras)) * 100, 2) AS Porcentaje
+        FROM compra
+        LEFT JOIN producto ON compra.idproducto = producto.idproducto
+        GROUP BY YEAR(compra.fecha)
+        ORDER BY Año ASC;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener el resumen de compras:', err);
+            res.status(500).json({ error: 'Error al obtener el resumen de compras' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+// Endpoint para obtener las ventas por producto por año
+app.get('/ventas-por-producto', (req, res) => {
+    const query = `
+        SELECT 
+            source.Producto_Idproducto_nomprod AS Nombre_Producto, 
+            source.Año AS Año, 
+            SUM(source.total) AS Total
+        FROM (
+            SELECT 
+                compra.idproducto AS idproducto, 
+                compra.total AS total, 
+                compra.fecha AS fecha,
+                YEAR(compra.fecha) AS Año,
+                Producto_Idproducto.nomprod AS Producto_Idproducto_nomprod,
+                Producto_Idproducto.idproducto AS Producto_Idproducto_idproducto
+            FROM compra
+            LEFT JOIN producto AS Producto_Idproducto ON compra.idproducto = Producto_Idproducto.idproducto
+            LEFT JOIN comentarios AS Comentarios_Idproducto ON compra.idproducto = Comentarios_Idproducto.idproducto
+        ) AS source
+        GROUP BY 
+            source.Producto_Idproducto_nomprod, 
+            source.Año
+        ORDER BY 
+            source.Producto_Idproducto_nomprod DESC, 
+            source.Año DESC;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener el resumen de compras:', err);
+            res.status(500).json({ error: 'Error al obtener el resumen de compras' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
+
+// Endpoint para obtener el total de productos vendidos por cada usuario
+app.get('/productos-vendidos-por-usuario', (req, res) => {
+    const query = `
+        SELECT 
+            u.user AS nombre_usuario,
+            SUM(jt.cantidad) AS total_productos_vendidos
+        FROM compras c
+        JOIN JSON_TABLE(
+            c.productos, 
+            '$[*]' COLUMNS (
+                idproducto INT PATH '$.idproducto',
+                cantidad INT PATH '$.cantidad'
+            )
+        ) jt ON jt.idproducto IS NOT NULL
+        JOIN producto p ON p.idproducto = jt.idproducto
+        JOIN users u ON u.iduser = p.iduser
+        GROUP BY u.user
+        ORDER BY total_productos_vendidos DESC;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener productos vendidos por usuario:', err);
+            res.status(500).json({ error: 'Error interno del servidor' });
+            return;
+        }
+
+        if (results.length === 0) {
+            res.status(404).json({ message: 'No se encontraron usuarios con productos vendidos' });
+            return;
+        }
+
+        res.status(200).json(results);
+    });
+});
+
+
+// Endpoint para obtener el número de productos creados por cada usuario y ordenarlos de mayor a menor
+app.get('/productos-por-usuario', (req, res) => {
+    const query = `
+        SELECT 
+            users.user AS nombre_usuario,
+            COUNT(producto.idproducto) AS total_productos
+        FROM 
+            users
+        LEFT JOIN 
+            producto ON users.iduser = producto.iduser
+        GROUP BY 
+            users.user
+        ORDER BY 
+            total_productos DESC;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener los productos por usuario:', err);
+            res.status(500).json({ error: 'Error al obtener los productos por usuario' });
+            return;
+        }
+        res.status(200).json(results);
+    });
+});
+
+
+// Endpoint para obtener productos con clave PER y su cantidad total comprada
+app.get('/productos-clave-PER', (req, res) => {
+    const query = `
+        SELECT 
+            p.nomprod AS nombre_producto, 
+            SUM(jt.cantidad) AS total_cantidad_comprada
+        FROM compras c
+        JOIN JSON_TABLE(
+            c.productos, 
+            '$[*]' COLUMNS (
+                idproducto INT PATH '$.idproducto',
+                cantidad INT PATH '$.cantidad'
+            )
+        ) jt ON jt.idproducto IS NOT NULL
+        JOIN producto p ON p.idproducto = jt.idproducto
+        WHERE p.clave = 'PER'
+        GROUP BY p.nomprod
+        ORDER BY total_cantidad_comprada DESC;
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener productos con la clave PER:', err);
+            res.status(500).json({ error: 'Error interno del servidor' });
+            return;
+        }
+
+        if (results.length === 0) {
+            res.status(404).json({ message: 'No se encontraron productos con la clave PER' });
+            return;
+        }
+
+        res.status(200).json(results);
+    });
+});
+
+//
+
 // Función para obtener compras por producto y mes usando JSON_EXTRACT
 const getComprasOrdenadasPorMes = (callback) => {
     const query = `
@@ -3574,6 +3742,22 @@ app.get('/cantidad-usuarios', (req, res) => {
         return;
       }
       res.status(200).json({ cantidad_usuarios: result[0].cantidad_usuarios });
+    });
+  });
+
+
+  //visitas totales
+
+  app.get('/vistas-totales', (req, res) => {
+    const query = 'SELECT SUM(numero_de_visitas) AS total_visitas FROM visitas_por_mes'; 
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener el total de visitas:', err);
+        res.status(500).json({ error: 'Error al obtener el total de visitas' });
+        return;
+      }
+      res.status(200).json({ total_visitas: result[0].total_visitas });
     });
   });
 
