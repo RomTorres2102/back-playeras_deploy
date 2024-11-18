@@ -736,16 +736,12 @@ app.post('/registrar-visita', (req, res) => {
 // Endpoint para obtener el resumen de compras por año
 app.get('/resumen-compras', (req, res) => {
     const query = `
-        WITH TotalCompras AS (
-            SELECT SUM(compra.total) AS Total
-            FROM compra
-        )
         SELECT 
             YEAR(compra.fecha) AS Año, 
             COUNT(*) AS Count, 
             SUM(compra.total) AS Sum, 
             AVG(compra.total) AS Avg, 
-            ROUND((SUM(compra.total) / (SELECT Total FROM TotalCompras)) * 100, 2) AS Porcentaje
+            ROUND((SUM(compra.total) / (SELECT SUM(total) FROM compra)) * 100, 2) AS Porcentaje
         FROM compra
         LEFT JOIN producto ON compra.idproducto = producto.idproducto
         GROUP BY YEAR(compra.fecha)
@@ -761,6 +757,7 @@ app.get('/resumen-compras', (req, res) => {
         res.status(200).json(results);
     });
 });
+
 // Endpoint para obtener las ventas por producto por año
 app.get('/ventas-por-producto', (req, res) => {
     const query = `
@@ -803,20 +800,34 @@ app.get('/ventas-por-producto', (req, res) => {
 app.get('/productos-vendidos-por-usuario', (req, res) => {
     const query = `
         SELECT 
-            u.user AS nombre_usuario,
-            SUM(jt.cantidad) AS total_productos_vendidos
-        FROM compras c
-        JOIN JSON_TABLE(
-            c.productos, 
-            '$[*]' COLUMNS (
-                idproducto INT PATH '$.idproducto',
-                cantidad INT PATH '$.cantidad'
-            )
-        ) jt ON jt.idproducto IS NOT NULL
-        JOIN producto p ON p.idproducto = jt.idproducto
-        JOIN users u ON u.iduser = p.iduser
-        GROUP BY u.user
-        ORDER BY total_productos_vendidos DESC;
+    users.user AS nombre_usuario, 
+    SUM(
+        JSON_UNQUOTE(
+            JSON_EXTRACT(compras.productos, CONCAT('$[', idx.i, '].cantidad'))
+        )
+    ) AS total_productos_vendidos
+FROM producto
+JOIN compras 
+    ON JSON_CONTAINS(
+        compras.productos, 
+        JSON_OBJECT('idproducto', producto.idproducto)
+    )
+JOIN users 
+    ON producto.iduser = users.iduser
+JOIN (
+    SELECT 0 AS i UNION ALL 
+    SELECT 1 UNION ALL 
+    SELECT 2 UNION ALL 
+    SELECT 3 UNION ALL 
+    SELECT 4 UNION ALL 
+    SELECT 5 UNION ALL 
+    SELECT 6 UNION ALL 
+    SELECT 7 UNION ALL 
+    SELECT 8 UNION ALL 
+    SELECT 9
+) idx
+GROUP BY users.user
+ORDER BY total_productos_vendidos DESC;
     `;
 
     db.query(query, (err, results) => {
@@ -867,19 +878,32 @@ app.get('/productos-por-usuario', (req, res) => {
 app.get('/productos-clave-PER', (req, res) => {
     const query = `
         SELECT 
-            p.nomprod AS nombre_producto, 
-            SUM(jt.cantidad) AS total_cantidad_comprada
-        FROM compras c
-        JOIN JSON_TABLE(
-            c.productos, 
-            '$[*]' COLUMNS (
-                idproducto INT PATH '$.idproducto',
-                cantidad INT PATH '$.cantidad'
+            producto.nomprod AS nombre_producto,
+            SUM(
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(compras.productos, CONCAT('$[', idx.i, '].cantidad'))
+                )
+            ) AS total_cantidad_comprada
+        FROM producto
+        JOIN compras
+            ON JSON_CONTAINS(
+                compras.productos, 
+                JSON_OBJECT('idproducto', producto.idproducto)
             )
-        ) jt ON jt.idproducto IS NOT NULL
-        JOIN producto p ON p.idproducto = jt.idproducto
-        WHERE p.clave = 'PER'
-        GROUP BY p.nomprod
+        JOIN (
+            SELECT 0 AS i UNION ALL 
+            SELECT 1 UNION ALL 
+            SELECT 2 UNION ALL 
+            SELECT 3 UNION ALL 
+            SELECT 4 UNION ALL 
+            SELECT 5 UNION ALL 
+            SELECT 6 UNION ALL 
+            SELECT 7 UNION ALL 
+            SELECT 8 UNION ALL 
+            SELECT 9
+        ) idx
+        WHERE producto.clave = 'PER'
+        GROUP BY producto.nomprod
         ORDER BY total_cantidad_comprada DESC;
     `;
 
@@ -3691,11 +3715,6 @@ app.delete('/eliminar-personalizacion/:idpersonalizacion', (req, res) => {
 });
 
 
-const port = process.env.PORT || 5000;
-app.listen(port, () => {
-    console.log(`Servidor funcionando en el puerto ${port}`);
-});
-
 // Endpoint para obtener los productos más calificados
 app.get('/productos-mas-calificados', (req, res) => {
     const query = `
@@ -3760,6 +3779,57 @@ app.get('/cantidad-usuarios', (req, res) => {
       res.status(200).json({ total_visitas: result[0].total_visitas });
     });
   });
+
+
+// Usuarios Recientes
+  app.get('/usuarios-recientes', (req, res) => {
+  const query = `
+    SELECT *
+FROM users
+ORDER BY created_at DESC
+LIMIT 8;
+
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error al obtener los usuarios recientes:', err);
+      res.status(500).json({ error: 'Error al obtener los usuarios recientes' });
+      return;
+    }
+    res.status(200).json(result);
+  });
+});
+
+
+// Top estados
+
+app.get('/top-estados', (req, res) => {
+  const query = `
+    SELECT 
+        estado,
+        COUNT(*) AS total_usuarios,
+        ROUND((COUNT(*) / (SELECT COUNT(*) FROM users) * 100), 1) AS porcentaje
+    FROM 
+        users
+    GROUP BY 
+        estado
+    ORDER BY 
+        total_usuarios DESC
+    LIMIT 5;
+  `;
+
+  db.query(query, (err, result) => {
+    if (err) {
+      console.error('Error al obtener los estados con más usuarios:', err);
+      res.status(500).json({ error: 'Error al obtener los estados con más usuarios' });
+      return;
+    }
+    res.status(200).json(result);
+  });
+});
+
+
 
   //Backend
 
@@ -3839,3 +3909,9 @@ app.get('/top-usuarios-compras', (req, res) => {
         res.status(200).json(results);
     });
 });
+
+const port = process.env.PORT || 5000;
+app.listen(port, () => {
+    console.log(`Servidor funcionando en el puerto ${port}`);
+});
+
