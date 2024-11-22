@@ -9,6 +9,7 @@ import paypal from '@paypal/checkout-server-sdk';
 import path from 'path'; 
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import fs from 'fs';
 
 
 
@@ -17,13 +18,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Configuración de multer para manejar la subida de archivos
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/'); // Asegúrate de tener una carpeta "uploads" en tu proyecto
+    cb(null, 'uploads/');
   },
   filename: (req, file, cb) => {
     cb(null, `${file.fieldname}-${Date.now()}${path.extname(file.originalname)}`);
@@ -57,6 +59,35 @@ app.post('/upload', upload.fields([
   // Responder con las rutas de los archivos subidos
   res.status(200).json(filteredFilepaths);
 });
+
+
+
+
+// Función para convertir base64 a archivo
+const base64ToFile = (base64Str, fileName) => {
+  const matches = base64Str.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
+  const response = {};
+
+  if (!matches || matches.length !== 3) {
+    return new Error('Formato de base64 inválido');
+  }
+
+  response.type = matches[1];
+  response.data = Buffer.from(matches[2], 'base64');
+
+  // Generar un ID aleatorio para el archivo
+  const uniqueId = crypto.randomBytes(16).toString('hex');
+  const newFileName = `${fileName}-${uniqueId}${path.extname(fileName)}`;
+  const relativePath = path.join('uploads', newFileName); // Ruta relativa
+  const absolutePath = path.join(__dirname, relativePath); // Ruta absoluta
+
+  fs.writeFileSync(absolutePath, response.data, { encoding: 'base64' });
+
+  return relativePath; // Retorna la ruta relativa
+};
+
+  
+
 
 
 const db = mysql.createConnection({
@@ -230,7 +261,7 @@ const deletePersonalizacion = (idpersonalizacion, callback) => {
   db.query(query, [idpersonalizacion], callback);
 };
 
-// Funciones de modelo de Productos
+
 // Función para crear un producto
 const createProducto = async (iduser, p_producto, nomprod, clave, descripcion, foto, foto2, foto3, descuento, tipo_personalizacion, callback) => {
     try {
@@ -546,26 +577,27 @@ const deleteDetalleEntrega = (identrega, callback) => {
 
 // modelos para detalle_personalizacion
 
-const createDetallePersonalizacion = (idcompra, lado_frontal, lado_trasero, callback) => {
+const createDetallePersonalizacion = (idcompra, lado_frontal, lado_trasero, foto, foto2, callback) => {
     const query = `
         INSERT INTO detalle_personalizacion 
-        (idcompra, lado_frontal, lado_trasero)
-        VALUES (?, ?, ?)
+        (idcompra, lado_frontal, lado_trasero, foto, foto2)
+        VALUES (?, ?, ?, ?, ?)
     `;
-    db.query(query, [idcompra, lado_frontal, lado_trasero], callback);
+    db.query(query, [idcompra, lado_frontal, lado_trasero, foto, foto2], callback);
 };
 
-const updateDetallePersonalizacion = (idpersonalizacion, idcompra, lado_frontal, lado_trasero, callback) => {
+const updateDetallePersonalizacion = (idpersonalizacion, idcompra, lado_frontal, lado_trasero, foto, foto2, callback) => {
     const query = `UPDATE detalle_personalizacion SET 
-                    idcompra = ?, lado_frontal = ?, lado_trasero = ?
+                    idcompra = ?, lado_frontal = ?, lado_trasero = ?, foto = ?, foto2 = ?
                   WHERE idpersonalizacion = ?`;
-    db.query(query, [idcompra, lado_frontal, lado_trasero, idpersonalizacion], callback);
+    db.query(query, [idcompra, lado_frontal, lado_trasero, foto, foto2, idpersonalizacion], callback);
 };
 
 const deleteDetallePersonalizacion = (idpersonalizacion, callback) => {
     const query = 'DELETE FROM detalle_personalizacion WHERE idpersonalizacion = ?';
     db.query(query, [idpersonalizacion], callback);
 };
+
 
 
 // Ruta para capturar la orden de PayPal
@@ -1240,31 +1272,57 @@ app.get('/mejores-productos', (req, res) => {
 });
 
 app.get('/total-compras', (req, res) => {
-  const query = 'SELECT COUNT(*) AS total_compras FROM compra;';
-
-  db.query(query, (err, result) => {
-    if (err) {
-      console.error('Error al obtener el total de compras:', err);
-      res.status(500).json({ error: 'Error al obtener el total de compras' });
-      return;
-    }
-    res.status(200).json(result[0]); // result[0] porque COUNT(*) devuelve un solo registro con el conteo
+    const query = `
+      SELECT SUM(
+        JSON_UNQUOTE(
+          JSON_EXTRACT(producto, '$.cantidad')
+        )
+      ) AS total_productos_comprados
+      FROM compras, JSON_TABLE(productos, '$[*]' COLUMNS (producto JSON PATH '$')) AS p;
+    `;
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener el total de productos comprados:', err);
+        res.status(500).json({ error: 'Error al obtener el total de productos comprados' });
+        return;
+      }
+      res.status(200).json({ total_productos_comprados: result[0].total_productos_comprados });
+    });
   });
-});
+  
 
 // Endpoint para obtener el total de dinero de compras
 app.get('/total-dinero-compras', (req, res) => {
-  const query = 'SELECT SUM(total) AS total_dinero_compras FROM compra';
-
-  db.query(query, (err, result) => {
-    if (err) {
-      console.error('Error al obtener el total de dinero de compras:', err);
-      res.status(500).json({ error: 'Error al obtener el total de dinero de compras' });
-      return;
-    }
-    res.status(200).json({ total_dinero_compras: result[0].total_dinero_compras });
+    const query = 'SELECT SUM(total) AS total_dinero_compras FROM compras';
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener el total de dinero de compras:', err);
+        res.status(500).json({ error: 'Error al obtener el total de dinero de compras' });
+        return;
+      }
+      res.status(200).json({ total_dinero_compras: result[0].total_dinero_compras });
+    });
   });
-});
+
+ //obtener media del dinero total 
+
+ app.get('/media-dinero-compras', (req, res) => {
+    const query = 'SELECT ROUND(AVG(total), 1) AS media_dinero_compras FROM compras';
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener la media de dinero de compras:', err);
+        res.status(500).json({ error: 'Error al obtener la media de dinero de compras' });
+        return;
+      }
+      res.status(200).json({ media_dinero_compras: result[0].media_dinero_compras });
+    });
+  });
+  
+  
+  
 // Endpoint GET para obtener una foto específica del carrusel por ID
 app.get('/carrusel/:idfoto', (req, res) => {
     const { idfoto } = req.params;
@@ -1293,6 +1351,27 @@ app.post('/nuevo-carrusel', (req, res) => {
         res.status(201).json({ message: 'Foto agregada exitosamente', idfoto: results.insertId });
     });
 });
+
+app.get('/cupones-mas-usados', (req, res) => {
+    const query = `
+      SELECT codigoCupon, COUNT(*) AS uso_cupon
+      FROM compras_detalle
+      WHERE codigoCupon IS NOT NULL AND codigoCupon != ''
+      GROUP BY codigoCupon
+      ORDER BY uso_cupon DESC
+      LIMIT 5;
+    `;
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener los cupones más usados:', err);
+        res.status(500).json({ error: 'Error al obtener los cupones más usados' });
+        return;
+      }
+      res.status(200).json(result);
+    });
+  });
+  
 
 // Endpoint PUT para actualizar una foto del carrusel
 app.put('/actualizar-carrusel/:idfoto', (req, res) => {
@@ -2500,7 +2579,7 @@ app.get('/compra/usuario/:iduser', (req, res) => {
 
 
 app.post('/nueva-compras', (req, res) => {
-    const { fecha, iduser, productos, codigoCupon, detalleEntrega } = req.body;
+    const { fecha, iduser, productos, codigoCupon, detalleEntrega, detallePersonalizacion } = req.body;
 
     // Desestructurar los valores de detalleEntrega
     const { pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono } = detalleEntrega;
@@ -2520,18 +2599,16 @@ app.post('/nueva-compras', (req, res) => {
                 if (productResults.length === 0) {
                     return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
                 }
-
                 const p_final = productResults[0].p_final;
                 let total_producto = p_final * producto.cantidad;
-
                 if (descuento > 0) {
                     total_producto -= total_producto * (descuento / 100);
                 }
-
                 productosProcesados.push({
                     idproducto: producto.idproducto,
                     cantidad: producto.cantidad,
                     talla: producto.talla, // Guardar la talla
+                    tipo_personalizacion: producto.tipo_personalizacion,
                     total_producto: total_producto
                 });
 
@@ -2541,7 +2618,6 @@ app.post('/nueva-compras', (req, res) => {
                             console.error('Error al crear la compra:', compraErr);
                             return res.status(500).json({ message: 'Error interno del servidor' });
                         }
-
                         const idcompra = compraResults.insertId;
 
                         // Crear los detalles de la compra
@@ -2558,7 +2634,38 @@ app.post('/nueva-compras', (req, res) => {
                                     return res.status(500).json({ message: 'Error interno del servidor al crear detalle de entrega' });
                                 }
 
-                                res.status(201).json({ message: 'Compra, detalles de compra y detalle de entrega creados exitosamente' });
+                                // Crear el detalle de personalización solo si es personalizado
+                                if (producto.tipo_personalizacion === 'personalizado') {
+                                    const { lado_frontal, lado_trasero, foto, foto2 } = detallePersonalizacion;
+                                    let fotoPath = '';
+                                    let foto2Path = '';
+                                    try {
+                                        if (foto) {
+                                            fotoPath = base64ToFile(foto, 'fotofrontal.png');
+                                        }
+                                        if (foto2) {
+                                            foto2Path = base64ToFile(foto2, 'fototrasero.png');
+                                        }
+                                    } catch (error) {
+                                        console.error('Error al convertir imágenes:', error);
+                                        return res.status(500).json({ message: 'Error interno del servidor al convertir imágenes' });
+                                    }
+                                    createDetallePersonalizacion(idcompra, lado_frontal, lado_trasero, fotoPath, foto2Path, (personalizacionErr) => {
+                                        if (personalizacionErr) {
+                                            console.error('Error al crear el detalle de personalización:', personalizacionErr);
+                                            return res.status(500).json({ message: 'Error interno del servidor al crear detalle de personalización' });
+                                        }
+                                        res.status(201).json({ message: 'Compra, detalles de compra, detalle de entrega y detalle de personalización creados exitosamente' });
+                                    });
+                                } else {
+                                    createDetallePersonalizacion(idcompra, null, null, null, null, (personalizacionErr) => {
+                                        if (personalizacionErr) {
+                                            console.error('Error al crear el detalle de personalización:', personalizacionErr);
+                                            return res.status(500).json({ message: 'Error interno del servidor al crear detalle de personalización' });
+                                        }
+                                        res.status(201).json({ message: 'Compra, detalles de compra y detalle de entrega creados exitosamente' });
+                                    });
+                                }
                             });
                         });
                     });
@@ -2578,8 +2685,6 @@ app.post('/nueva-compras', (req, res) => {
             console.log('Usuario no encontrado:', iduser);
             return res.status(404).json({ message: 'Usuario no encontrado' });
         }
-
-        // Validar el cupón si se proporciona uno
         if (codigoCupon) {
             const cuponQuery = 'SELECT * FROM cupones WHERE codigo = ? AND activo = 1 AND usos_maximos > 0 AND fecha_expiracion >= NOW()';
             db.query(cuponQuery, [codigoCupon], (cuponErr, cuponResults) => {
@@ -2590,12 +2695,10 @@ app.post('/nueva-compras', (req, res) => {
                 if (cuponResults.length === 0) {
                     return res.status(404).json({ message: 'Cupón no válido o expirado' });
                 }
-
                 const descuento = cuponResults[0].porcentaje; // Obtener el porcentaje de descuento
                 procesarProductosConDescuento(descuento);
             });
         } else {
-            // Si no hay cupón, procesar los productos sin descuento
             procesarProductosConDescuento(0);
         }
     });
@@ -3567,6 +3670,27 @@ app.get('/detalle-entregaxcompra/:idcompra', (req, res) => {
 });
 
 
+// Ruta para obtener un detalle de persoanlizacion por idcompra
+app.get('/detalle-perxcompra/:idcompra', (req, res) => {
+    const { idcompra } = req.params;
+
+    const query = 'SELECT * FROM detalle_personalizacion WHERE idcompra = ?';
+    
+    db.query(query, [idcompra], (err, result) => {
+        if (err) {
+            return res.status(500).json({ error: 'Error al buscar el detalle de la personalizacion' });
+        }
+
+        if (result.length === 0) {
+            return res.status(404).json({ message: 'detalle de la personalizacion no encontrado' });
+        }
+
+        // Devolver todos los registros como array, no solo el primero
+        res.json(result);
+    });
+});
+
+
 //apis para detalle de entrega
 
 app.post('/nuevo-detalle-entrega', (req, res) => {
@@ -3938,19 +4062,18 @@ app.get('/top-usuarios-compras', (req, res) => {
 
 
 app.post('/nuevo-detalle-personalizacion', (req, res) => {
-    const { idcompra, lado_frontal, lado_trasero } = req.body;
-    createDetallePersonalizacion(idcompra, lado_frontal, lado_trasero, (err, result) => {
+    const { idcompra, lado_frontal, lado_trasero, foto, foto2 } = req.body;
+    createDetallePersonalizacion(idcompra, lado_frontal, lado_trasero, foto, foto2, (err, result) => {
         if (err) return res.status(500).send(err);
         res.status(201).json({ message: 'Detalle de personalización creado con éxito', idpersonalizacion: result.insertId });
     });
 });
 
-
 app.put('/actualizar-detalle-personalizacion/:idpersonalizacion', (req, res) => {
     const { idpersonalizacion } = req.params;
-    const { idcompra, lado_frontal, lado_trasero } = req.body;
+    const { idcompra, lado_frontal, lado_trasero, foto, foto2 } = req.body;
 
-    updateDetallePersonalizacion(idpersonalizacion, idcompra, lado_frontal, lado_trasero, (err, result) => {
+    updateDetallePersonalizacion(idpersonalizacion, idcompra, lado_frontal, lado_trasero, foto, foto2, (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ message: 'Detalle de personalización actualizado con éxito' });
     });
@@ -3962,6 +4085,30 @@ app.delete('/eliminar-detalle-personalizacion/:idpersonalizacion', (req, res) =>
     deleteDetallePersonalizacion(idpersonalizacion, (err, result) => {
         if (err) return res.status(500).send(err);
         res.json({ message: 'Detalle de personalización eliminado con éxito' });
+    });
+});
+
+app.get('/compras-no-personalizado', (req, res) => {
+    const query = `SELECT * FROM compras WHERE JSON_CONTAINS(productos, '{"tipo_personalizacion": "no_personalizado"}')`;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener las compras:', err);
+            return res.status(500).json({ message: 'Error interno del servidor' });
+        }
+        res.status(200).json(results);
+    });
+});
+
+app.get('/compras-personalizado', (req, res) => {
+    const query = `SELECT * FROM compras WHERE JSON_CONTAINS(productos, '{"tipo_personalizacion": "personalizado"}')`;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener las compras:', err);
+            return res.status(500).json({ message: 'Error interno del servidor' });
+        }
+        res.status(200).json(results);
     });
 });
 
