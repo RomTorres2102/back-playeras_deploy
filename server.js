@@ -544,6 +544,29 @@ const deleteDetalleEntrega = (identrega, callback) => {
     db.query(query, [identrega], callback);
 };
 
+// modelos para detalle_personalizacion
+
+const createDetallePersonalizacion = (idcompra, lado_frontal, lado_trasero, callback) => {
+    const query = `
+        INSERT INTO detalle_personalizacion 
+        (idcompra, lado_frontal, lado_trasero)
+        VALUES (?, ?, ?)
+    `;
+    db.query(query, [idcompra, lado_frontal, lado_trasero], callback);
+};
+
+const updateDetallePersonalizacion = (idpersonalizacion, idcompra, lado_frontal, lado_trasero, callback) => {
+    const query = `UPDATE detalle_personalizacion SET 
+                    idcompra = ?, lado_frontal = ?, lado_trasero = ?
+                  WHERE idpersonalizacion = ?`;
+    db.query(query, [idcompra, lado_frontal, lado_trasero, idpersonalizacion], callback);
+};
+
+const deleteDetallePersonalizacion = (idpersonalizacion, callback) => {
+    const query = 'DELETE FROM detalle_personalizacion WHERE idpersonalizacion = ?';
+    db.query(query, [idpersonalizacion], callback);
+};
+
 
 // Ruta para capturar la orden de PayPal
 app.post('/capture-order', async (req, res) => {
@@ -3544,7 +3567,7 @@ app.get('/detalle-entregaxcompra/:idcompra', (req, res) => {
 });
 
 
-
+//apis para detalle de entrega
 
 app.post('/nuevo-detalle-entrega', (req, res) => {
     const { idcompra, pais, nombre, apellidos, direccion, colonia, codigo_postal, ciudad, estado, telefono } = req.body;
@@ -3909,6 +3932,39 @@ app.get('/top-usuarios-compras', (req, res) => {
         res.status(200).json(results);
     });
 });
+
+
+//ENDPOINT PARA DETALLE DE PERSONALIZACION
+
+
+app.post('/nuevo-detalle-personalizacion', (req, res) => {
+    const { idcompra, lado_frontal, lado_trasero } = req.body;
+    createDetallePersonalizacion(idcompra, lado_frontal, lado_trasero, (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.status(201).json({ message: 'Detalle de personalización creado con éxito', idpersonalizacion: result.insertId });
+    });
+});
+
+
+app.put('/actualizar-detalle-personalizacion/:idpersonalizacion', (req, res) => {
+    const { idpersonalizacion } = req.params;
+    const { idcompra, lado_frontal, lado_trasero } = req.body;
+
+    updateDetallePersonalizacion(idpersonalizacion, idcompra, lado_frontal, lado_trasero, (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.json({ message: 'Detalle de personalización actualizado con éxito' });
+    });
+});
+
+app.delete('/eliminar-detalle-personalizacion/:idpersonalizacion', (req, res) => {
+    const { idpersonalizacion } = req.params;
+
+    deleteDetallePersonalizacion(idpersonalizacion, (err, result) => {
+        if (err) return res.status(500).send(err);
+        res.json({ message: 'Detalle de personalización eliminado con éxito' });
+    });
+});
+
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => {
