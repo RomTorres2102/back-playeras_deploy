@@ -1306,6 +1306,26 @@ app.get('/total-dinero-compras', (req, res) => {
     });
   });
 
+  app.get('/total-dinero-compras-mes', (req, res) => {
+    const query = `
+      SELECT DATE_FORMAT(fecha, '%Y-%m') AS mes, 
+             SUM(total) AS total_compras 
+      FROM compras
+      GROUP BY mes
+      ORDER BY mes;
+    `;
+  
+    db.query(query, (err, result) => {
+      if (err) {
+        console.error('Error al obtener el total de dinero de compras por mes:', err);
+        res.status(500).json({ error: 'Error al obtener el total de dinero de compras por mes' });
+        return;
+      }
+      res.status(200).json(result);
+    });
+  });
+  
+
  //obtener media del dinero total 
 
  app.get('/media-dinero-compras', (req, res) => {
