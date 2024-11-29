@@ -11,8 +11,6 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import fs from 'fs';
 
-
-
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,7 +20,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Configuración de multer para manejar la subida de archivos
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -34,7 +31,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Endpoint para subir la imagen
 app.post('/upload', upload.fields([
   { name: 'foto', maxCount: 1 },
   { name: 'foto2', maxCount: 1 },
@@ -44,26 +40,19 @@ app.post('/upload', upload.fields([
     return res.status(400).json({ message: 'No se subieron archivos' });
   }
 
-  // Obtener los archivos subidos
   const filepaths = {
     foto: req.files['foto'] ? `uploads/${req.files['foto'][0].filename}` : '',
     foto2: req.files['foto2'] ? `uploads/${req.files['foto2'][0].filename}` : '',
     foto3: req.files['foto3'] ? `uploads/${req.files['foto3'][0].filename}` : ''
   };
 
-  // Filtrar solo los campos con archivos subidos
   const filteredFilepaths = Object.fromEntries(
     Object.entries(filepaths).filter(([key, value]) => value !== '')
   );
 
-  // Responder con las rutas de los archivos subidos
   res.status(200).json(filteredFilepaths);
 });
 
-
-
-
-// Función para convertir base64 a archivo
 const base64ToFile = (base64Str, fileName) => {
   const matches = base64Str.match(/^data:image\/([A-Za-z-+\/]+);base64,(.+)$/);
   const response = {};
@@ -75,42 +64,53 @@ const base64ToFile = (base64Str, fileName) => {
   response.type = matches[1];
   response.data = Buffer.from(matches[2], 'base64');
 
-  // Generar un ID aleatorio para el archivo
   const uniqueId = crypto.randomBytes(16).toString('hex');
   const newFileName = `${fileName}-${uniqueId}${path.extname(fileName)}`;
-  const relativePath = path.join('uploads', newFileName); // Ruta relativa
-  const absolutePath = path.join(__dirname, relativePath); // Ruta absoluta
+  const relativePath = path.join('uploads', newFileName);
+  const absolutePath = path.join(__dirname, relativePath);
 
   fs.writeFileSync(absolutePath, response.data, { encoding: 'base64' });
 
-  return relativePath; // Retorna la ruta relativa
+  return relativePath;
 };
 
-  
-
-
-
 const db = mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: process.env.DB_PORT 
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
+  connectTimeout: 10000 // Añade un tiempo de espera para la conexión
 });
 
-db.connect(err => {
+function handleDisconnect() {
+  db.connect(err => {
     if (err) {
-        console.error('Error al conectar con la BD:', err);
-        return;
+      console.error('Error al conectar con la BD:', err);
+      setTimeout(handleDisconnect, 2000);
+    } else {
+      console.log('Conectado a la base de datos');
     }
-    console.log('Conectado a la base de datos');
-});
+  });
+
+  db.on('error', err => {
+    console.error('Error en la conexión con la BD:', err);
+    if (err.code === 'PROTOCOL_CONNECTION_LOST') {
+      handleDisconnect();
+    } else {
+      throw err;
+    }
+  });
+}
+
+handleDisconnect();
 
 const environment = new paypal.core.SandboxEnvironment(
-  process.env.PAYPAL_CLIENT_ID, 
+  process.env.PAYPAL_CLIENT_ID,
   process.env.PAYPAL_CLIENT_SECRET
 );
 const client = new paypal.core.PayPalHttpClient(environment);
+
 
 
 
