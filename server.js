@@ -115,16 +115,18 @@ const client = new paypal.core.PayPalHttpClient(environment);
 
 
 // Función para crear un cupón
-const createCupon = (porcentaje, codigo, fecha_expiracion, usos_maximos, activo, callback) => {
-    const query = 'INSERT INTO cupones (porcentaje, codigo, fecha_expiracion, usos_maximos, activo) VALUES (?, ?, ?, ?, ?)';
-    db.query(query, [porcentaje, codigo, fecha_expiracion, usos_maximos, activo], callback);
+const createCupon = (porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion, callback) => {
+    const query = 'INSERT INTO cupones (porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion) VALUES (?, ?, ?, ?, ?, ?)';
+    db.query(query, [porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion], callback);
 };
 
+
 // Actualizar cupón
-const updateCupon = (idcupon, porcentaje, codigo, fecha_expiracion, usos_maximos, activo, callback) => {
-    const query = 'UPDATE cupones SET porcentaje = ?, codigo = ?, fecha_expiracion = ?, usos_maximos = ?, activo = ? WHERE idcupon = ?';
-    db.query(query, [porcentaje, codigo, fecha_expiracion, usos_maximos, activo, idcupon], callback);
+const updateCupon = (idcupon, porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion, callback) => {
+    const query = 'UPDATE cupones SET porcentaje = ?, codigo = ?, fecha_expiracion = ?, usos_maximos = ?, activo = ?, descripcion = ? WHERE idcupon = ?';
+    db.query(query, [porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion, idcupon], callback);
 };
+
 
 // Eliminar cupón
 const deleteCupon = (idcupon, callback) => {
@@ -1548,14 +1550,40 @@ app.post('/nuevo-usuario', async (req, res) => {
     const { user, password, email, fecha_nacimiento, sexo, foto, estado } = req.body;
     const idrol = 1; // ID de rol predeterminado
     const defaultFoto = foto || 'uploads/default.jpg'; // Asignar imagen por defecto si no se proporciona una
+
     createUser(user, password, email, fecha_nacimiento, sexo, defaultFoto, estado, idrol, (err, results) => {
         if (err) {
-            res.status(500).send(err);
-            return;
+            return res.status(500).send(err);
         }
-        res.status(201).json({ message: 'Usuario registrado exitosamente' });
+
+        const userId = results.insertId; // Obtener el ID del nuevo usuario
+
+        // Buscar el cupón con el código NUEVOU53R
+        const queryCupon = 'SELECT idcupon FROM cupones WHERE codigo = "NUEVOU53R" AND activo = 1';
+        db.query(queryCupon, (err, resultsCupon) => {
+            if (err) {
+                return res.status(500).send(err);
+            }
+            
+            if (resultsCupon.length === 0) {
+                return res.status(404).json({ message: 'Cupón no encontrado o inactivo' });
+            }
+
+            const cuponId = resultsCupon[0].idcupon;
+
+            // Asignar el cupón al nuevo usuario
+            const queryAsignarCupon = 'INSERT INTO user_cupones (iduser, idcupon) VALUES (?, ?)';
+            db.query(queryAsignarCupon, [userId, cuponId], (err) => {
+                if (err) {
+                    return res.status(500).send(err);
+                }
+
+                res.status(201).json({ message: 'Usuario registrado exitosamente y cupón asignado' });
+            });
+        });
     });
 });
+
 
 
 
@@ -2610,7 +2638,7 @@ app.post('/nueva-compras', (req, res) => {
         const productosProcesados = [];
 
         productos.forEach((producto, index) => {
-            const productQuery = 'SELECT p_final FROM producto WHERE idproducto = ?';
+            const productQuery = 'SELECT p_final, clave FROM producto WHERE idproducto = ?';
             db.query(productQuery, [producto.idproducto], (productErr, productResults) => {
                 if (productErr) {
                     console.error('Error al consultar el producto:', productErr);
@@ -2619,7 +2647,7 @@ app.post('/nueva-compras', (req, res) => {
                 if (productResults.length === 0) {
                     return res.status(404).json({ message: `Producto con id ${producto.idproducto} no encontrado` });
                 }
-                const p_final = productResults[0].p_final;
+                const { p_final, clave } = productResults[0];
                 let total_producto = p_final * producto.cantidad;
                 if (descuento > 0) {
                     total_producto -= total_producto * (descuento / 100);
@@ -2629,7 +2657,8 @@ app.post('/nueva-compras', (req, res) => {
                     cantidad: producto.cantidad,
                     talla: producto.talla, // Guardar la talla
                     tipo_personalizacion: producto.tipo_personalizacion,
-                    total_producto: total_producto
+                    total_producto: total_producto,
+                    clave: clave // Agregar la clave aquí para utilizarla en la verificación de cupones
                 });
 
                 if (index === productos.length - 1) {
@@ -2675,7 +2704,13 @@ app.post('/nueva-compras', (req, res) => {
                                             console.error('Error al crear el detalle de personalización:', personalizacionErr);
                                             return res.status(500).json({ message: 'Error interno del servidor al crear detalle de personalización' });
                                         }
-                                        res.status(201).json({ message: 'Compra, detalles de compra, detalle de entrega y detalle de personalización creados exitosamente' });
+                                        verificarYAsignarCupones(iduser, productosProcesados, (err, cuponMessage) => {
+                                            if (err) {
+                                                console.error('Error al asignar cupones:', err);
+                                                return res.status(500).json({ message: 'Error al asignar cupones' });
+                                            }
+                                            res.status(201).json({ message: `Compra y detalles creados exitosamente. ${cuponMessage}` });
+                                        });
                                     });
                                 } else {
                                     createDetallePersonalizacion(idcompra, null, null, null, null, (personalizacionErr) => {
@@ -2683,7 +2718,13 @@ app.post('/nueva-compras', (req, res) => {
                                             console.error('Error al crear el detalle de personalización:', personalizacionErr);
                                             return res.status(500).json({ message: 'Error interno del servidor al crear detalle de personalización' });
                                         }
-                                        res.status(201).json({ message: 'Compra, detalles de compra y detalle de entrega creados exitosamente' });
+                                        verificarYAsignarCupones(iduser, productosProcesados, (err, cuponMessage) => {
+                                            if (err) {
+                                                console.error('Error al asignar cupones:', err);
+                                                return res.status(500).json({ message: 'Error al asignar cupones' });
+                                            }
+                                            res.status(201).json({ message: `Compra y detalles creados exitosamente. ${cuponMessage}` });
+                                        });
                                     });
                                 }
                             });
@@ -2723,6 +2764,8 @@ app.post('/nueva-compras', (req, res) => {
         }
     });
 });
+
+
 
 
 // Endpoint PUT para actualizar una compra
@@ -3570,8 +3613,8 @@ app.get('/cupones', (req, res) => {
 
 // Endpoint POST para crear un cupón
 app.post('/nuevo-cupon', (req, res) => {
-    const { porcentaje, codigo, fecha_expiracion, usos_maximos, activo } = req.body;
-    createCupon(porcentaje, codigo, fecha_expiracion, usos_maximos, activo, (err, results) => {
+    const { porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion } = req.body;
+    createCupon(porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion, (err, results) => {
         if (err) {
             return res.status(500).send(err);
         }
@@ -3579,11 +3622,12 @@ app.post('/nuevo-cupon', (req, res) => {
     });
 });
 
+
 // Endpoint PUT para actualizar un cupón
 app.put('/actualizar-cupon/:idcupon', (req, res) => {
     const { idcupon } = req.params;
-    const { porcentaje, codigo, fecha_expiracion, usos_maximos, activo } = req.body;
-    updateCupon(idcupon, porcentaje, codigo, fecha_expiracion, usos_maximos, activo, (err, results) => {
+    const { porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion } = req.body;
+    updateCupon(idcupon, porcentaje, codigo, fecha_expiracion, usos_maximos, activo, descripcion, (err, results) => {
         if (err) {
             return res.status(500).send(err);
         }
@@ -3593,6 +3637,7 @@ app.put('/actualizar-cupon/:idcupon', (req, res) => {
         res.status(200).json({ message: 'Cupón actualizado exitosamente' });
     });
 });
+
 
 // Endpoint DELETE para eliminar un cupón
 app.delete('/eliminar-cupon/:idcupon', (req, res) => {
@@ -3609,21 +3654,38 @@ app.delete('/eliminar-cupon/:idcupon', (req, res) => {
 });
 
 
+
 // Endpoint POST para validar cupón
 app.post('/validar-cupon', (req, res) => {
-    const { codigo } = req.body;
-    const query = 'SELECT * FROM cupones WHERE codigo = ? AND activo = 1 AND usos_maximos > 0 AND fecha_expiracion >= NOW()';
+    const { iduser, codigo } = req.body;
 
-    db.query(query, [codigo], (err, results) => {
+    // Validar el cupón
+    const queryValidarCupon = `
+        SELECT cupones.idcupon, cupones.porcentaje, cupones.usos_maximos, cupones.usos_actuales 
+        FROM cupones 
+        JOIN user_cupones ON cupones.idcupon = user_cupones.idcupon 
+        WHERE cupones.codigo = ? 
+          AND cupones.activo = 1 
+          AND cupones.usos_maximos > cupones.usos_actuales 
+          AND cupones.fecha_expiracion >= NOW() 
+          AND user_cupones.iduser = ?
+    `;
+    
+    db.query(queryValidarCupon, [codigo, iduser], (err, results) => {
         if (err) {
             return res.status(500).send(err);
         }
         if (results.length === 0) {
-            return res.status(404).json({ message: 'Cupón no válido o expirado' });
+            return res.status(404).json({ message: 'Cupón no válido, expirado o no reclamado por el usuario' });
         }
-        res.status(200).json(results[0]);
+
+        const cupon = results[0];
+
+        res.status(200).json({ message: 'Cupón válido', porcentaje: cupon.porcentaje });
     });
 });
+
+
 // Endpoint GET para obtener un cupón por ID
 app.get('/cupones/:idcupon', (req, res) => {
     const { idcupon } = req.params;
@@ -4131,6 +4193,134 @@ app.get('/compras-personalizado', (req, res) => {
         res.status(200).json(results);
     });
 });
+
+
+// TODO LO QUE TENGA QUE VER CON CUPONES VA AQUI
+
+// Endpoint GET para obtener cupones reclamados por un usuario
+app.get('/cupones-reclamados/:iduser', (req, res) => {
+    const { iduser } = req.params;
+
+    const query = `
+        SELECT cupones.*, user_cupones.fecha_reclamacion 
+        FROM cupones 
+        JOIN user_cupones ON cupones.idcupon = user_cupones.idcupon
+        WHERE user_cupones.iduser = ?
+    `;
+
+    db.query(query, [iduser], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'No se encontraron cupones para este usuario' });
+        }
+        res.status(200).json(results);
+    });
+});
+
+
+// REGLAS DE CUPONES
+
+const cuponesReglas = [
+    { clave: 'One Piece', cantidadRequerida: 3, codigoCupon: 'ONEPIECE5', descripcion: 'Compra 3 productos con la temática de One Piece y obtén un cupón del 5%' },
+    { clave: 'Dragon Ball', cantidadRequerida: 2, codigoCupon: 'SAIYAN2', descripcion: 'Compra 2 productos con temática de Dragon Ball y obtén un cupón de descuento del 5%' },
+    { clave: 'Dragon Ball', cantidadRequerida: 3, codigoCupon: 'DRAGON2024', descripcion: 'Compra 3 productos con temática de Dragon Ball y obtén un cupón de descuento del 10%' }
+    // Aquí podrás añadir más reglas según sea necesario
+];
+
+const verificarYAsignarCupones = (iduser, productos, callback) => {
+    let cuponesAsignados = [];
+
+    cuponesReglas.forEach((cupon, index) => {
+        const productoCount = productos.reduce((count, producto) => {
+            return producto.clave === cupon.clave ? count + producto.cantidad : count;
+        }, 0);
+
+        console.log(`Cantidad de productos con clave ${cupon.clave}: ${productoCount}`);
+
+        if (productoCount === cupon.cantidadRequerida && !cuponesAsignados.includes(cupon.codigoCupon)) {
+            console.log(`Verificando existencia del cupón ${cupon.codigoCupon} para el usuario ${iduser}`);
+            const queryVerificarCupon = `
+                SELECT cupones.idcupon 
+                FROM user_cupones 
+                JOIN cupones ON user_cupones.idcupon = cupones.idcupon 
+                WHERE user_cupones.iduser = ? 
+                  AND cupones.codigo = ?
+            `;
+            db.query(queryVerificarCupon, [iduser, cupon.codigoCupon], (err, results) => {
+                if (err) {
+                    console.error('Error al verificar existencia del cupón:', err);
+                    return callback(err);
+                }
+
+                if (results.length > 0) {
+                    console.log(`El usuario ${iduser} ya tiene el cupón ${cupon.codigoCupon}`);
+                    if (index === cuponesReglas.length - 1 && cuponesAsignados.length === 0) {
+                        callback(null, 'No se asignaron cupones adicionales');
+                    }
+                    return;
+                }
+
+                const queryVerificarHistorial = `
+                    SELECT cupones_usados.idcupon 
+                    FROM cupones_usados 
+                    JOIN cupones ON cupones_usados.idcupon = cupones.idcupon 
+                    WHERE cupones_usados.iduser = ? 
+                      AND cupones.codigo = ?
+                `;
+                db.query(queryVerificarHistorial, [iduser, cupon.codigoCupon], (err, results) => {
+                    if (err) {
+                        console.error('Error al verificar historial del cupón:', err);
+                        return callback(err);
+                    }
+
+                    if (results.length > 0) {
+                        console.log(`El usuario ${iduser} ya ha utilizado el cupón ${cupon.codigoCupon}`);
+                        if (index === cuponesReglas.length - 1 && cuponesAsignados.length === 0) {
+                            callback(null, 'No se asignaron cupones adicionales');
+                        }
+                        return;
+                    }
+
+                    console.log(`Asignando cupón ${cupon.codigoCupon} al usuario ${iduser}`);
+                    const queryCupon = 'SELECT idcupon FROM cupones WHERE codigo = ? AND activo = 1';
+                    db.query(queryCupon, [cupon.codigoCupon], (err, results) => {
+                        if (err) {
+                            console.error('Error al buscar el cupón:', err);
+                            return callback(err);
+                        }
+
+                        if (results.length === 0) {
+                            console.log(`Cupón ${cupon.codigoCupon} no encontrado o inactivo`);
+                            return callback(new Error(`Cupón ${cupon.codigoCupon} no encontrado o inactivo`));
+                        }
+
+                        const cuponId = results[0].idcupon;
+                        console.log(`Cupón ${cupon.codigoCupon} encontrado con id ${cuponId}`);
+
+                        const queryAsignarCupon = 'INSERT INTO user_cupones (iduser, idcupon) VALUES (?, ?)';
+                        db.query(queryAsignarCupon, [iduser, cuponId], (err) => {
+                            if (err) {
+                                console.error('Error al asignar el cupón:', err);
+                                return callback(err);
+                            }
+
+                            cuponesAsignados.push(cupon.codigoCupon);
+                            console.log(`Cupón ${cupon.codigoCupon} asignado exitosamente al usuario ${iduser}`);
+
+                            if (index === cuponesReglas.length - 1) {
+                                callback(null, `Cupones asignados: ${cuponesAsignados.join(', ')}`);
+                            }
+                        });
+                    });
+                });
+            });
+        } else if (index === cuponesReglas.length - 1 && cuponesAsignados.length === 0) {
+            callback(null, 'No se asignaron cupones adicionales');
+        }
+    });
+};
 
 
 const port = process.env.PORT || 5000;
