@@ -1376,23 +1376,57 @@ app.post('/nuevo-carrusel', (req, res) => {
 
 app.get('/cupones-mas-usados', (req, res) => {
     const query = `
-      SELECT codigoCupon, COUNT(*) AS uso_cupon
-      FROM compras_detalle
-      WHERE codigoCupon IS NOT NULL AND codigoCupon != ''
-      GROUP BY codigoCupon
-      ORDER BY uso_cupon DESC
-      LIMIT 5;
+        SELECT 
+            cupones.codigo AS nombre_codigo,
+            COUNT(cupones_usados.idcupon) AS cantidad_usados
+        FROM 
+            cupones_usados
+        JOIN 
+            cupones ON cupones_usados.idcupon = cupones.idcupon
+        GROUP BY 
+            cupones.codigo
+        ORDER BY 
+            cantidad_usados DESC
+        LIMIT 5;
     `;
   
     db.query(query, (err, result) => {
-      if (err) {
-        console.error('Error al obtener los cupones más usados:', err);
-        res.status(500).json({ error: 'Error al obtener los cupones más usados' });
-        return;
-      }
-      res.status(200).json(result);
+        if (err) {
+            console.error('Error al obtener los cupones más usados:', err);
+            res.status(500).json({ error: 'Error al obtener los cupones más usados' });
+            return;
+        }
+        res.status(200).json(result);
     });
-  });
+});
+app.get('/usuarios-cupones-usados', (req, res) => {
+    const query = `
+        SELECT 
+            users.user AS nombre_usuario,
+            users.foto AS foto_usuario,
+            COUNT(cupones_usados.idcupon) AS cantidad_usados
+        FROM 
+            cupones_usados
+        JOIN 
+            users ON cupones_usados.iduser = users.iduser
+        GROUP BY 
+            users.user, users.foto
+        ORDER BY 
+            cantidad_usados DESC
+        LIMIT 5;
+    `;
+  
+    db.query(query, (err, result) => {
+        if (err) {
+            console.error('Error al obtener los usuarios con más cupones usados:', err);
+            res.status(500).json({ error: 'Error al obtener los usuarios con más cupones usados' });
+            return;
+        }
+        res.status(200).json(result);
+    });
+});
+
+
   
 
 // Endpoint PUT para actualizar una foto del carrusel
@@ -3656,19 +3690,23 @@ app.delete('/eliminar-cupon/:idcupon', (req, res) => {
 
 
 // Endpoint POST para validar cupón
+
+// Endpoint para validar y usar el cupón
 app.post('/validar-cupon', (req, res) => {
     const { iduser, codigo } = req.body;
 
-    // Validar el cupón
+    // Validar el cupón y verificar si ya ha sido usado por el usuario
     const queryValidarCupon = `
         SELECT cupones.idcupon, cupones.porcentaje, cupones.usos_maximos, cupones.usos_actuales 
         FROM cupones 
         JOIN user_cupones ON cupones.idcupon = user_cupones.idcupon 
+        LEFT JOIN cupones_usados ON cupones.idcupon = cupones_usados.idcupon AND cupones_usados.iduser = user_cupones.iduser
         WHERE cupones.codigo = ? 
           AND cupones.activo = 1 
           AND cupones.usos_maximos > cupones.usos_actuales 
           AND cupones.fecha_expiracion >= NOW() 
           AND user_cupones.iduser = ?
+          AND cupones_usados.idcupon IS NULL
     `;
     
     db.query(queryValidarCupon, [codigo, iduser], (err, results) => {
@@ -3676,15 +3714,30 @@ app.post('/validar-cupon', (req, res) => {
             return res.status(500).send(err);
         }
         if (results.length === 0) {
-            return res.status(404).json({ message: 'Cupón no válido, expirado o no reclamado por el usuario' });
+            return res.status(404).json({ message: 'Cupón no válido, expirado, ya usado o no reclamado por el usuario' });
         }
 
         const cupon = results[0];
 
-        res.status(200).json({ message: 'Cupón válido', porcentaje: cupon.porcentaje });
+        // Actualizar los usos del cupón
+        const queryActualizarUsos = 'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE idcupon = ?';
+        db.query(queryActualizarUsos, [cupon.idcupon], (err) => {
+            if (err) {
+                return res.status(500).send(err);
+            }
+
+            res.status(200).json({ message: 'Cupón válido', porcentaje: cupon.porcentaje });
+
+            // Registrar el uso del cupón en la tabla cupones_usados
+            const queryRegistrarUso = 'INSERT INTO cupones_usados (iduser, idcupon, fecha_uso) VALUES (?, ?, NOW())';
+            db.query(queryRegistrarUso, [iduser, cupon.idcupon], (err) => {
+                if (err) {
+                    console.error('Error al registrar el uso del cupón:', err);
+                }
+            });
+        });
     });
 });
-
 
 // Endpoint GET para obtener un cupón por ID
 app.get('/cupones/:idcupon', (req, res) => {
@@ -4078,7 +4131,7 @@ const getTopPurchasedProducts = (callback) => {
         JOIN producto p ON JSON_UNQUOTE(JSON_EXTRACT(c.productos, '$[0].idproducto')) = p.idproducto
         GROUP BY p.idproducto, p.nomprod, p.foto
         ORDER BY total_comprado DESC
-        LIMIT 10;
+        LIMIT 5;
     `;
 
     db.query(query, (err, results) => {
@@ -4117,7 +4170,7 @@ const getTopUserPurchases = (callback) => {
         JOIN users u ON c.iduser = u.iduser
         GROUP BY c.iduser, u.user, u.foto
         ORDER BY cantidad_compras DESC
-        LIMIT 10;
+        LIMIT 6;  
     `;
 
     db.query(query, (err, results) => {
@@ -4202,9 +4255,10 @@ app.get('/cupones-reclamados/:iduser', (req, res) => {
     const { iduser } = req.params;
 
     const query = `
-        SELECT cupones.*, user_cupones.fecha_reclamacion 
+        SELECT cupones.*, user_cupones.fecha_reclamacion, cupones_usados.fecha_uso 
         FROM cupones 
         JOIN user_cupones ON cupones.idcupon = user_cupones.idcupon
+        LEFT JOIN cupones_usados ON cupones.idcupon = cupones_usados.idcupon AND cupones_usados.iduser = user_cupones.iduser
         WHERE user_cupones.iduser = ?
     `;
 
@@ -4220,13 +4274,14 @@ app.get('/cupones-reclamados/:iduser', (req, res) => {
 });
 
 
+
+
 // REGLAS DE CUPONES
 
 const cuponesReglas = [
     { clave: 'One Piece', cantidadRequerida: 3, codigoCupon: 'ONEPIECE5', descripcion: 'Compra 3 productos con la temática de One Piece y obtén un cupón del 5%' },
     { clave: 'Dragon Ball', cantidadRequerida: 2, codigoCupon: 'SAIYAN2', descripcion: 'Compra 2 productos con temática de Dragon Ball y obtén un cupón de descuento del 5%' },
     { clave: 'Dragon Ball', cantidadRequerida: 3, codigoCupon: 'DRAGON2024', descripcion: 'Compra 3 productos con temática de Dragon Ball y obtén un cupón de descuento del 10%' }
-    // Aquí podrás añadir más reglas según sea necesario
 ];
 
 const verificarYAsignarCupones = (iduser, productos, callback) => {
@@ -4239,7 +4294,7 @@ const verificarYAsignarCupones = (iduser, productos, callback) => {
 
         console.log(`Cantidad de productos con clave ${cupon.clave}: ${productoCount}`);
 
-        if (productoCount === cupon.cantidadRequerida && !cuponesAsignados.includes(cupon.codigoCupon)) {
+        if (productoCount >= cupon.cantidadRequerida && !cuponesAsignados.includes(cupon.codigoCupon)) {
             console.log(`Verificando existencia del cupón ${cupon.codigoCupon} para el usuario ${iduser}`);
             const queryVerificarCupon = `
                 SELECT cupones.idcupon 
@@ -4321,6 +4376,31 @@ const verificarYAsignarCupones = (iduser, productos, callback) => {
         }
     });
 };
+
+
+// Endpoint para registrar el uso del cupón
+app.post('/registrar-uso-cupon', (req, res) => {
+    const { iduser, codigo } = req.body;
+
+    const queryCupon = 'SELECT idcupon FROM cupones WHERE codigo = ?';
+    db.query(queryCupon, [codigo], (err, results) => {
+        if (err) {
+            return res.status(500).send(err);
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'Cupón no encontrado' });
+        }
+
+        const cuponId = results[0].idcupon;
+        const queryRegistrarUso = 'INSERT INTO cupones_usados (iduser, idcupon, fecha_uso) VALUES (?, ?, NOW())';
+        db.query(queryRegistrarUso, [iduser, cuponId], (err) => {
+            if (err) {
+                return res.status(500).send(err);
+            }
+            res.status(200).json({ message: 'Uso del cupón registrado exitosamente' });
+        });
+    });
+});
 
 
 const port = process.env.PORT || 5000;
